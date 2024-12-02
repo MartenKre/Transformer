@@ -20,18 +20,14 @@ from .transformer import build_transformer
 
 class DETR(nn.Module):
     """ This is the DETR module that performs object detection """
-    def __init__(self, backbone, transformer, num_classes, num_queries, input_dim_gt, aux_loss=False):
+    def __init__(self, backbone, transformer, input_dim_gt, aux_loss=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
             transformer: torch module of the transformer architecture. See transformer.py
-            num_classes: number of object classes
-            num_queries: number of object queries, ie detection slot. This is the maximal number of objects
-                         DETR can detect in a single image. For COCO, we recommend 100 queries.
             aux_loss: True if auxiliary decoding losses (loss at each decoder layer) are to be used.
         """
         super().__init__()
-        self.num_queries = num_queries
         self.transformer = transformer
         hidden_dim = transformer.d_model
         self.class_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
