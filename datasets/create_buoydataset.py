@@ -127,7 +127,7 @@ def haversineDist(lat1, lon1, lat2, lon2):
     r = 6371 # Radius of earth in kilometers. Use 3956 for miles. Determines return value units.
     return c * r * 1e3
 
-def filterBuoys(ship_pose, buoyCoords, fov_with_padding=100, dist_thresh=1000, nearby_thresh=30):
+def filterBuoys(ship_pose, buoyCoords, fov_with_padding=110, dist_thresh=1000, nearby_thresh=30):
     """function selects nearby gt buoys (relative to ship pos) from a list containing buoy Coordinates
     Args:
         ship_pose: list of form [lat,lng,heading]
@@ -135,9 +135,7 @@ def filterBuoys(ship_pose, buoyCoords, fov_with_padding=100, dist_thresh=1000, n
         fov_with_padding: fov of camera plus additional padding to account for inaccuracies
         dist_thresh: only buoys inside this threshold will be considered
         nearby_thresh: all buoys inside this thresh will pe added, even if outside of fov
-    Returns:
-        list of turples of matches indices [(a,b),(c,d)] where a is index of gt and b of pred
-    """
+     """
 
     selected_buoys = []
     # compute transformation matrix from ecef to ship cs
@@ -149,9 +147,9 @@ def filterBuoys(ship_pose, buoyCoords, fov_with_padding=100, dist_thresh=1000, n
         lng = buoy["geometry"]["coordinates"][0]
         x,y,z = LatLng2ECEF(lat, lng)
         pos_bouy = Ship_T_ECEF @ np.array([x,y,z,1]) # transform buoys from ecef to ship cs
-        bearing = np.arctan2(pos_bouy[1],pos_bouy[0])   # compute bearing of buoy
+        bearing = np.rad2deg(np.arctan2(pos_bouy[1],pos_bouy[0]))   # compute bearing of buoy
         dist_to_ship = haversineDist(lat, lng, ship_pose[0], ship_pose[1])  # compute dist to ship
-        if abs(bearing) <= fov_with_padding and dist_to_ship <= dist_thresh:
+        if abs(bearing) <= fov_with_padding / 2 and dist_to_ship <= dist_thresh:
             # include buoys that are within fov+padding and inside maxdist
             selected_buoys.append((lat, lng))
         elif dist_to_ship <= nearby_thresh:
@@ -199,7 +197,7 @@ def createQueryData(ship_pose, buoyList):
         ECEF_T_SHIP = T_ECEF_Ship(x,y,z,ship_pose[2])
         x,y,z = LatLng2ECEF(*buoy)
         p_b = np.linalg.pinv(ECEF_T_SHIP) @ np.array([x, y, z, 1])
-        bearing = np.arctan(p_b[1]/p_b[0])
+        bearing = np.rad2deg(np.arctan2(p_b[1], p_b[0]))
 
         result.append([dist, bearing, *buoy])
 
@@ -249,6 +247,9 @@ os.makedirs(os.path.join(target_dir, "labels"), exist_ok=True)
 os.makedirs(os.path.join(target_dir, "queries"), exist_ok=True)
 sample_counter = 0
 
+# TODO: Add entire training folder (not only stpeteBuoysonly)
+# TODO Add test data
+
 for folder in os.listdir(data_path):
     folder_path = os.path.join(data_path, folder)
     images = os.path.join(folder_path, "images")
@@ -274,7 +275,7 @@ for folder in os.listdir(data_path):
         queries = createQueryData(ship_pose, filteredGT)
         queryFile = os.path.join(target_dir, "queries", sample_name + 'txt')
         with open(queryFile, 'w') as f:
-            data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + "\n" for i,data in enumerate(queries)]
+            data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + " " + str(data[2]) + " " + str(data[3]) + "\n" for i,data in enumerate(queries)]
             f.writelines(data)
 
         # create labels file
@@ -286,7 +287,5 @@ for folder in os.listdir(data_path):
             f.writelines(txtlabels)
 
         sample_counter += 1
-
-    break
 
 print("DONE!")
