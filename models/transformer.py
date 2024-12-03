@@ -215,7 +215,7 @@ class TransformerDecoderLayer(nn.Module):
                      pos: Optional[Tensor] = None):
 
         q = k = tgt
-        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
+        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,      # use this attention mask to block seq passing
                               key_padding_mask=tgt_key_padding_mask)[0]
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
@@ -238,7 +238,7 @@ class TransformerDecoderLayer(nn.Module):
                     pos: Optional[Tensor] = None):
         tgt2 = self.norm1(tgt)
         q = k = tgt2
-        tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask,
+        tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask, # use this attention mask to block seq passing
                               key_padding_mask=tgt_key_padding_mask)[0]
         tgt = tgt + self.dropout1(tgt2)
         tgt2 = self.norm2(tgt)
