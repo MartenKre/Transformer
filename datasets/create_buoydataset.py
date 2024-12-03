@@ -6,7 +6,7 @@ from os.path import exists
 import geojson
 import numpy as np
 import pyproj
-from math import sin, cos, asin, sqrt, radians
+from math import sin, cos, asin, sqrt, radians, floor
 import shutil
 
 # class do get relevant buoy GT positions (Decoder Input)
@@ -160,7 +160,7 @@ def filterBuoys(ship_pose, buoyCoords, fov_with_padding=100, dist_thresh=1000, n
 
     return list(set(selected_buoys))
 
-def getIMUData(self, path):
+def getIMUData(path):
     # function returns IMU data as list
 
     if os.path.isfile(path):
@@ -205,19 +205,19 @@ def createQueryData(ship_pose, buoyList):
 
     return result
 
-def LabelsJSON2Yolo(labels, queries):
+def labelsJSON2Yolo(labels, queries):
     # fuction converts json data to yolo format with corresponding query ID
     result = []
     for BB in labels[1]["objects"]:
         if "distanceGT" in BB["attributes"]:
             # get query ID
-            lat_BB = round(BB["attributes"]["buoyLat"], 10)
-            lng_BB = round(BB["attributes"]["buoyLng"], 10)
-            queryIDs = [i for i,lat,lng in enumerate(queries) if round(lat, 10) == lat_BB and round(lng, 10) == lng_BB]
-            if len(queryIDs) == 0 or len(queryIDs) > 1:
-                print("Warning: Either no buoy or multiple buoys matched to BB with associated BouyGT!")
-                print(f"queryIDs: {queryIDs}")
-            queryID = queryIDs[0]
+            lat_BB = BB["attributes"]["buoyLat"]
+            lng_BB = BB["attributes"]["buoyLng"]
+            distances = list(map(lambda x: haversineDist(lat_BB, lng_BB, x[2], x[3]), queries))
+            queryID = np.argmin(distances)
+            if distances[queryID] > 30:
+                print("Warning: No distance between query Buoy and Label buoy exceeds thresh")
+                print(lat_BB, lng_BB, distances)
            
             # get BB info in yolo format
             x1 = BB["x1"]
@@ -235,52 +235,58 @@ def LabelsJSON2Yolo(labels, queries):
     return result 
 
 
-if __name__ == "main":
-    target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1"
-    data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/StPete_BuoysOnly/"
-    os.makedirs(target_dir, exist_ok=True)
+target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1"
+data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/StPete_BuoysOnly/"
+os.makedirs(target_dir, exist_ok=True)
 
-    buoyGTData = GetGeoData()
+buoyGTData = GetGeoData()
 
-    # train data
-    target_dir = os.path.join(target_dir, "train")
-    os.makedirs(target_dir, exist_ok=True)
-    os.makedirs(os.path.join(target_dir, "images"), exist_ok=True)
-    os.makedirs(os.path.join(target_dir, "labels"), exist_ok=True)
-    os.makedirs(os.path.join(target_dir, "queries"), exist_ok=True)
-    sample_counter = 0
-    for folder in os.listdir(data_path):
-        folder_path = os.path.join(data_path, folder)
-        images = os.path.join(folder_path, "images")
-        imu = os.listdir(os.path.join(folder_path, "imu"))[0]
-        labels = os.path.join(folder_path, "labels")
-        
-        imu_data = getIMUData(os.path.join(folder, "imu", imu)) 
+# train data
+target_dir = os.path.join(target_dir, "train")
+os.makedirs(target_dir, exist_ok=True)
+os.makedirs(os.path.join(target_dir, "images"), exist_ok=True)
+os.makedirs(os.path.join(target_dir, "labels"), exist_ok=True)
+os.makedirs(os.path.join(target_dir, "queries"), exist_ok=True)
+sample_counter = 0
 
-        for sample in os.listdir(images):
-            # copy image
-            src_path = os.path.join(images, sample)
-            sample_name = "0" * (6-len(list(str(sample_counter)))) + str(sample_counter)
-            dest_path = os.path.join(target_dir, "images", sample_name)
-            shutil.copy(src_path, dest_path)
+for folder in os.listdir(data_path):
+    folder_path = os.path.join(data_path, folder)
+    images = os.path.join(folder_path, "images")
+    imu = os.listdir(os.path.join(folder_path, "imu"))[0]
+    labels = os.path.join(folder_path, "labels")
+    imu_data = getIMUData(os.path.join(folder_path, "imu", imu)) 
 
-            # create query file
-            frame_id = int(sample.split(".")[0]) - 1
-            imu_curr = imu_data[frame_id] 
-            ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
-            buoys_on_tile = buoyGTData(ship_pose[0], ship_pose[1]) 
-            filteredGT = filterBuoys(ship_pose, buoys_on_tile)
-            queries = createQueryData(ship_pose, filteredGT)
-            queryFile = os.path.join(target_dir, "queries", sample_name)
-            with open(queryFile, 'w') as f:
-                data = [str(i) + " " + str(data[0]) + " " + data[1] for i,data in enumerate(queries)]
-                f.writelines(data)
+    print(f"Processing {folder}")
 
-            # create labels file
-            src_path = os.path.join(labels, sample+".json")
-            label_data = json.load(src_path)
-            txtlabels = LabelsJSON2Yolo(label_data, queries)
+    for sample in os.listdir(images):
+        # copy image
+        src_path = os.path.join(images, sample)
+        sample_name = "0" * (5-len(list(str(sample_counter)))) + str(sample_counter)
+        dest_path = os.path.join(target_dir, "images", sample_name + 'png')
+        shutil.copy(src_path, dest_path)
 
+        # create query file
+        frame_id = int(sample.split(".")[0]) - 1
+        imu_curr = imu_data[frame_id] 
+        ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
+        buoys_on_tile = buoyGTData.getBuoyLocations(ship_pose[0], ship_pose[1]) 
+        filteredGT = filterBuoys(ship_pose, buoys_on_tile)
+        queries = createQueryData(ship_pose, filteredGT)
+        queryFile = os.path.join(target_dir, "queries", sample_name + 'txt')
+        with open(queryFile, 'w') as f:
+            data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + "\n" for i,data in enumerate(queries)]
+            f.writelines(data)
 
+        # create labels file
+        src_path = os.path.join(labels, sample+".json")
+        label_data = json.load(open(src_path, 'r'))
+        txtlabels = labelsJSON2Yolo(label_data, queries)
+        labelfile = os.path.join(target_dir, "labels", sample_name + '.txt')
+        with open(labelfile, 'w') as f:
+            f.writelines(txtlabels)
 
+        sample_counter += 1
 
+    break
+
+print("DONE!")
