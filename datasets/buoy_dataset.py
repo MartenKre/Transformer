@@ -1,13 +1,25 @@
 """Custom Dataset for Buoy Data"""
 from torch.utils.data import Dataset
+from torchvision import transforms
+from torch.nn.utils.rnn import pad_sequence
 import torch
 import yaml
 import os
 import numpy as np
 import cv2
 
+
+def collate_fn(batch):
+    img, queries, labels = zip(*batch)
+    img = torch.stack(img, dim=0)
+    pad_q = pad_sequence(queries, batch_first=True, padding_value = 0.0)
+    pad_l = pad_sequence(labels, batch_first=True, padding_value = 0.0)
+    
+    return img, pad_q, pad_l
+    
+
 class BuoyDataset(Dataset):
-    def __init__(self, yaml_file, mode='train', transform=None) -> None:
+    def __init__(self, yaml_file, mode='train', transform=True) -> None:
         # mode: train/test/val
         super().__init__()
 
@@ -17,7 +29,15 @@ class BuoyDataset(Dataset):
         else:
             raise ValueError(f"Invalid mode ({mode}) for DataSet")
         self.data_path = None
-        self.transform = transform
+
+        tf = transforms.Compose([
+            transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],  # Normalize using ImageNet stats
+                                    std=[0.229, 0.224, 0.225])
+        ])
+        self.transform = None
+        if transform:
+            self.transform = tf
         self.processYAML()
 
         self.labels = sorted(os.listdir(os.path.join(self.data_path, "labels")))
@@ -50,8 +70,8 @@ class BuoyDataset(Dataset):
         img = cv2.imread(os.path.join(self.data_path, "images", self.images[index]))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        labels = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'labels', self.labels[index])))
-        queries = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'queries', self.queries[index])))
+        labels = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'labels', self.labels[index])), dtype=torch.float32)
+        queries = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'queries', self.queries[index])), dtype=torch.float32)
 
         # ensure 2D shape:
         if labels.ndim == 1:
