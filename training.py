@@ -61,7 +61,12 @@ model = DETR(
     aux_loss=True,
 )
 
+criterion = SetCriterion(num_classes, matcher=matcher, weight_dict=weight_dict,
+                             eos_coef=args.eos_coef, losses=losses)
+
 model.to(device)
+model.train()
+criterion.train()
 
 for img, queries, labels in dataloader:
     print(img.shape)
