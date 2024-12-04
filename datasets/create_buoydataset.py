@@ -263,7 +263,7 @@ for folder in os.listdir(data_path):
         # copy image
         src_path = os.path.join(images, sample)
         sample_name = "0" * (5-len(list(str(sample_counter)))) + str(sample_counter)
-        dest_path = os.path.join(target_dir, "images", sample_name + 'png')
+        dest_path = os.path.join(target_dir, "images", sample_name + '.png')
         shutil.copy(src_path, dest_path)
 
         # create query file
@@ -273,7 +273,7 @@ for folder in os.listdir(data_path):
         buoys_on_tile = buoyGTData.getBuoyLocations(ship_pose[0], ship_pose[1]) 
         filteredGT = filterBuoys(ship_pose, buoys_on_tile)
         queries = createQueryData(ship_pose, filteredGT)
-        queryFile = os.path.join(target_dir, "queries", sample_name + 'txt')
+        queryFile = os.path.join(target_dir, "queries", sample_name + '.txt')
         with open(queryFile, 'w') as f:
             data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + " " + str(data[2]) + " " + str(data[3]) + "\n" for i,data in enumerate(queries)]
             f.writelines(data)
@@ -285,7 +285,8 @@ for folder in os.listdir(data_path):
         labelfile = os.path.join(target_dir, "labels", sample_name + '.txt')
         with open(labelfile, 'w') as f:
             f.writelines(txtlabels)
-
         sample_counter += 1
+
+    break
 
 print("DONE!")

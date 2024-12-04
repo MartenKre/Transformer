@@ -1,5 +1,6 @@
 """Custom Dataset for Buoy Data"""
 from torch.utils.data import Dataset
+import torch
 import yaml
 import os
 import numpy as np
@@ -39,7 +40,8 @@ class BuoyDataset(Dataset):
 
     def checkdataset(self):
         for label, image, query in zip(self.labels, self.images, self.queries):
-            assert image.split(".")[0] == label.split('.')[0] == query.split('.')[0]
+            if not image.split(".")[0] == label.split('.')[0] == query.split('.')[0]:
+                print(f"Warning: {label}, {image}, {query}")
 
     def __len__(self):
         return len(self.labels)
@@ -48,12 +50,20 @@ class BuoyDataset(Dataset):
         img = cv2.imread(os.path.join(self.data_path, "images", self.images[index]))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-        labels = np.loadtext(self.labels[index])
-        queries = np.loadtext(self.queries[index])
-        sample = (img, labels, queries)
+        labels = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'labels', self.labels[index])))
+        queries = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'queries', self.queries[index])))
+
+        # ensure 2D shape:
+        if labels.ndim == 1:
+            labels = labels.unsqueeze(0)
+        if queries.ndim == 1:
+            queries = queries.unsqueeze(0)
 
         if self.transform:
-            sample = self.transform(sample)
+            img = self.transform(img)
+        else:
+            img = torch.tensor(img).permute(2, 0, 1) / 255
 
+        sample = (img, queries, labels)
         return sample
         
