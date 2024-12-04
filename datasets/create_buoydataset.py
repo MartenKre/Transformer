@@ -261,10 +261,9 @@ for folder in os.listdir(data_path):
 
     for sample in os.listdir(images):
         # copy image
-        src_path = os.path.join(images, sample)
+        src_path_img = os.path.join(images, sample)
         sample_name = "0" * (5-len(list(str(sample_counter)))) + str(sample_counter)
         dest_path = os.path.join(target_dir, "images", sample_name + '.png')
-        shutil.copy(src_path, dest_path)
 
         # create query file
         frame_id = int(sample.split(".")[0]) - 1
@@ -273,16 +272,29 @@ for folder in os.listdir(data_path):
         buoys_on_tile = buoyGTData.getBuoyLocations(ship_pose[0], ship_pose[1]) 
         filteredGT = filterBuoys(ship_pose, buoys_on_tile)
         queries = createQueryData(ship_pose, filteredGT)
+        if len(queries) == 0:
+            print(f"No nearby bouys found for file {src_path_img}")
+            print("Cannot generate queries -> Skipping")
+            continue
         queryFile = os.path.join(target_dir, "queries", sample_name + '.txt')
-        with open(queryFile, 'w') as f:
-            data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + " " + str(data[2]) + " " + str(data[3]) + "\n" for i,data in enumerate(queries)]
-            f.writelines(data)
 
         # create labels file
         src_path = os.path.join(labels, sample+".json")
         label_data = json.load(open(src_path, 'r'))
         txtlabels = labelsJSON2Yolo(label_data, queries)
+        if len(txtlabels) == 0:
+            print(f"Skipping empty Labels file: {src_path}")
+            continue
         labelfile = os.path.join(target_dir, "labels", sample_name + '.txt')
+
+
+        # save data
+        shutil.copy(src_path_img, dest_path)
+        
+        with open(queryFile, 'w') as f:
+            data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + " " + str(data[2]) + " " + str(data[3]) + "\n" for i,data in enumerate(queries)]
+            f.writelines(data)
+
         with open(labelfile, 'w') as f:
             f.writelines(txtlabels)
         sample_counter += 1

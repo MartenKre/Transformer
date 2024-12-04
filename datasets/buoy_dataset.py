@@ -72,19 +72,22 @@ class BuoyDataset(Dataset):
 
         labels = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'labels', self.labels[index])), dtype=torch.float32)
         queries = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'queries', self.queries[index])),
-                               dtype=torch.float32)[..., 0:2] # only take the first two datapoints in the label file
+                               dtype=torch.float32)[..., 0:3] # only take the first two datapoints in the label file
 
         # ensure 2D shape:
-        if labels.ndim == 1:
-            labels = labels.unsqueeze(0)
         if queries.ndim == 1:
             queries = queries.unsqueeze(0)
+        if labels.ndim == 1:
+            labels = labels.unsqueeze(0)
+
+        labels_extended = torch.zeros(queries.size(dim=0), 5, dtype=torch.float32)
+        labels_extended[labels[:, 0].int(), :] = labels[:, :]
 
         if self.transform:
             img = self.transform(img)
         else:
             img = torch.tensor(img).permute(2, 0, 1) / 255
 
-        sample = (img, queries, labels)
+        sample = (img, queries, labels_extended)
         return sample
         
