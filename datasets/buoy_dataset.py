@@ -71,7 +71,8 @@ class BuoyDataset(Dataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         labels = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'labels', self.labels[index])), dtype=torch.float32)
-        queries = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'queries', self.queries[index])), dtype=torch.float32)
+        queries = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'queries', self.queries[index])),
+                               dtype=torch.float32)[..., 0:2] # only take the first two datapoints in the label file
 
         # ensure 2D shape:
         if labels.ndim == 1:
