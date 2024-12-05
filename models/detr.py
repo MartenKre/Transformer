@@ -33,7 +33,7 @@ class DETR(nn.Module):
         self.class_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         #self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,angle1,angle2) -> embedding
+        self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
@@ -98,7 +98,6 @@ class SetCriterion(nn.Module):
         super().__init__()
         self.weight_dict = weight_dict
         self.losses = losses
-        self.register_buffer('empty_weight', empty_weight)
 
 
     def loss_labels(self, outputs, labels, queries_mask, labels_mask, num_q, num_l):
@@ -121,23 +120,23 @@ class SetCriterion(nn.Module):
 
     def loss_boxes(self, outputs, labels, queries_mask, labels_mask, num_q, num_l):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
-           targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
+            outputs: dict containing pred_boxess key that points to boxes pred tensor
+            targets: tensor with size (B_SZ, Max_seq_len, 5)
            The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
         assert 'pred_boxes' in outputs
-        idx = self._get_src_permutation_idx(indices)
-        src_boxes = outputs['pred_boxes'][idx]
-        target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        src_boxes = outputs['pred_boxes']
 
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+        target_boxes = labels[..., 1:]  # only extract relevant BB labels (not query id)
 
         losses = {}
-        losses['loss_bbox'] = loss_bbox.sum() / num_l
+        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+        losses['loss_bbox'] = loss_bbox[labels_mask].sum() / num_l # filter loss based on elements than contain gt label
 
         loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
             box_ops.box_cxcywh_to_xyxy(src_boxes),
             box_ops.box_cxcywh_to_xyxy(target_boxes)))
-        losses['loss_giou'] = loss_giou.sum() / num_l
+        losses['loss_giou'] = loss_giou[labels_mask].sum() / num_l
         return losses
 
     def get_loss(self, loss, outputs, targets, indices, num_boxes, **kwargs):
