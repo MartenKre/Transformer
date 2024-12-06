@@ -2,6 +2,8 @@ import torch
 import os
 import time
 import json
+import math
+import sys
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader, DistributedSampler
@@ -9,7 +11,7 @@ from models.detr import DETR, SetCriterion, PostProcess
 from models.transformer import Transformer
 from models.backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
-from util.misc import is_main_process, save_on_master
+from util.misc import is_main_process, save_on_master, reduce_dict
 
 
 def init_position_encoding(hidden_dim):
@@ -49,7 +51,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     model.train()
     criterion.train()
 
-    for images, queries, labels, queries_maks, labels_mask in data_loader:
+    for images, queries, labels, queries_mask, labels_mask in data_loader:
         images = images.to(device)
         queries = queries.to(device)
         labels = labels.to(device)
@@ -62,7 +64,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = utils.reduce_dict(loss_dict)
+        loss_dict_reduced = reduce_dict(loss_dict)
         loss_dict_reduced_unscaled = {f'{k}_unscaled': v
                                       for k, v in loss_dict_reduced.items()}
         loss_dict_reduced_scaled = {k: v * weight_dict[k]
@@ -153,7 +155,7 @@ n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print('number of params:', n_parameters)
 
 # Init Loss
-weight_dict = {'loss_ce': 1, 'loss_bbox': bbox_loss_coef}
+weight_dict = {'loss_bce': 1, 'loss_bbox': bbox_loss_coef}
 weight_dict['loss_giou'] = giou_loss_coef
 if aux_loss:
     aux_weight_dict = {}

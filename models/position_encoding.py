@@ -25,13 +25,12 @@ class PositionEmbeddingSine(nn.Module):
             scale = 2 * math.pi
         self.scale = scale
 
-    def forward(self, tensor_list: NestedTensor):
-        x = tensor_list.tensors
-        mask = tensor_list.mask
-        assert mask is not None
-        not_mask = ~mask
-        y_embed = not_mask.cumsum(1, dtype=torch.float32)
-        x_embed = not_mask.cumsum(2, dtype=torch.float32)
+    def forward(self, feature_map):
+        x = feature_map
+        y_embed = torch.arange(start=0,end=x.size(dim=2), dtype=torch.float32, device=x.device)
+        y_embed = y_embed.repeat(x.size(dim=0), x.size(dim=3), 1).permute(0, 2, 1)
+        x_embed = torch.arange(start=0,end=x.size(dim=3), dtype=torch.float32, device=x.device)
+        x_embed = x_embed.repeat(x.size(dim=0), x.size(dim=2), 1)
         if self.normalize:
             eps = 1e-6
             y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
