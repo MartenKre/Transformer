@@ -8,6 +8,7 @@ import numpy as np
 import pyproj
 from math import sin, cos, asin, sqrt, radians, floor
 import shutil
+import cv2
 
 # class do get relevant buoy GT positions (Decoder Input)
 class GetGeoData():
@@ -232,7 +233,9 @@ def labelsJSON2Yolo(labels, queries):
 
     return result 
 
-
+# Settings:
+resize_imgs = True
+resize_coeffs = [0.5, 0.5]
 target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1"
 data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/StPete_BuoysOnly/"
 os.makedirs(target_dir, exist_ok=True)
@@ -289,7 +292,12 @@ for folder in os.listdir(data_path):
 
 
         # save data
-        shutil.copy(src_path_img, dest_path)
+        if resize_imgs == False:
+            shutil.copy(src_path_img, dest_path)
+        else:
+            img = cv2.imread(src_path_img)
+            img_resized = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
+            cv2.imwrite(dest_path, img_resized)
         
         with open(queryFile, 'w') as f:
             data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + " " + str(data[2]) + " " + str(data[3]) + "\n" for i,data in enumerate(queries)]
