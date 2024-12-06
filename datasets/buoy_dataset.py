@@ -56,7 +56,7 @@ class BuoyDataset(Dataset):
             if self.mode in data:
                 self.data_path = data[self.mode]
                 if not os.path.exists(self.data_path):
-                    raise ValueError(f"Incorrect path to {self.mode} folder in YAML file")
+                    raise ValueError(f"Incorrect path to {self.mode} folder in YAML file: {self.data_path}")
             else:
                 raise ValueError(f"YAML file does not contain path to {self.mode} folder")
 
