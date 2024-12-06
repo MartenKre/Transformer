@@ -18,6 +18,7 @@ def init_position_encoding(hidden_dim):
 
     return position_embedding
 
+
 def init_backbone(lr_backbone, hidden_dim, masks=False, backbone='resnet50', dilation=True):
     # masks are only used for image segmentation
 
@@ -28,6 +29,7 @@ def init_backbone(lr_backbone, hidden_dim, masks=False, backbone='resnet50', dil
     model = Joiner(backbone, position_embedding)
     model.num_channels = backbone.num_channels
     return model
+
 
 def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
     return Transformer(
@@ -41,10 +43,53 @@ def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, d
         return_intermediate_dec=True,
     )
 
-def postprocess():
+
+def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm = 0):
+
+    model.train()
+    criterion.train()
+
+    for images, queries, labels, queries_maks, labels_mask in data_loader:
+        images = images.to(device)
+        queries = queries.to(device)
+        labels = labels.to(device)
+        queries_mask = queries_mask.to(device)
+        labels_mask = labels_mask.to(device)
+
+        outputs = model(images, queries, queries_mask)
+        loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
+        weight_dict = criterion.weight_dict
+        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+
+        # reduce losses over all GPUs for logging purposes
+        loss_dict_reduced = utils.reduce_dict(loss_dict)
+        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
+                                      for k, v in loss_dict_reduced.items()}
+        loss_dict_reduced_scaled = {k: v * weight_dict[k]
+                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
+        losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
+
+        loss_value = losses_reduced_scaled.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+            print(loss_dict_reduced)
+            sys.exit(1)
+
+        optimizer.zero_grad()
+        losses.backward()
+        if max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        optimizer.step()
+
+        metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
+        metric_logger.update(class_error=loss_dict_reduced['class_error'])
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     
-def train_one_epoch():
-    pass
 
 ###########
 # Settings
@@ -182,7 +227,7 @@ for epoch in range(start_epoch, epochs):
                 }, checkpoint_path)
 
         test_stats, coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+            model, criterion, postprocessors, data_loader_val, device, output_dir
         )
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
@@ -195,15 +240,13 @@ for epoch in range(start_epoch, epochs):
                 f.write(json.dumps(log_stats) + "\n")
 
             # for evaluation logs
-            if coco_evaluator is not None:
-                (output_dir / 'eval').mkdir(exist_ok=True)
-                if "bbox" in coco_evaluator.coco_eval:
-                    filenames = ['latest.pth']
-                    if epoch % 50 == 0:
-                        filenames.append(f'{epoch:03}.pth')
-                    for name in filenames:
-                        torch.save(coco_evaluator.coco_eval["bbox"].eval,
-                                   output_dir / "eval" / name)
+            (output_dir / 'eval').mkdir(exist_ok=True)
+            filenames = ['latest.pth']
+            if epoch % 50 == 0:
+                filenames.append(f'{epoch:03}.pth')
+            for name in filenames:
+                torch.save(coco_evaluator.coco_eval["bbox"].eval,
+                            output_dir / "eval" / name)
 
 total_time = time.time() - start_time
 total_time_str = str(time.datetime.timedelta(seconds=int(total_time)))

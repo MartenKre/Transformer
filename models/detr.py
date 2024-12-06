@@ -38,7 +38,7 @@ class DETR(nn.Module):
         self.backbone = backbone
         self.aux_loss = aux_loss
 
-    def forward(self, images: NestedTensor, buoyData):
+    def forward(self, images, queries, queries_mask):
         """ The forward expects a NestedTensor, which consists of:
                - images.tensor: batched images, of shape [batch_size x 3 x H x W]
                - images.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
@@ -54,15 +54,13 @@ class DETR(nn.Module):
                - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                                 dictionnaries containing the two above keys for each decoder layer.
         """
-        if isinstance(images, (list, torch.Tensor)):
-            images = nested_tensor_from_tensor_list(images)
         features, pos = self.backbone(images)
 
-        src, mask = features[-1].decompose()
-        assert mask is not None
-        encoder_input = self.input_proj(src)
-        decoder_input = self.query_embed(buoyData)
-        hs = self.transformer(encoder_input, mask, decoder_input, pos[-1])[0]
+        src, mask_img = features[-1].decompose()
+        assert mask_img is not None
+        encoder_embed = self.input_proj(src)
+        decoder_embed = self.query_embed(queries)
+        hs = self.transformer(encoder_embed, mask_img, decoder_embed, pos[-1])[0]
 
         outputs_objectness = self.class_embed(hs).sigmoid()
         outputs_objectness = outputs_objectness.permute(1, 0, 2).squeeze(dim=-1)
@@ -139,13 +137,13 @@ class SetCriterion(nn.Module):
         losses['loss_giou'] = loss_giou[labels_mask].sum() / num_l
         return losses
 
-    def get_loss(self, loss, outputs, targets, indices, num_boxes, **kwargs):
+    def get_loss(self, loss, outputs, labels, queries_mask, labels_mask, num_q, num_l):
         loss_map = {
             'labels': self.loss_labels,
             'boxes': self.loss_boxes,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
-        return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
+        return loss_map[loss](outputs, labels, queries_mask, labels_mask, num_q, num_l)
 
     def forward(self, outputs, labels, queries_mask, labels_mask):
         """ This performs the loss computation.
