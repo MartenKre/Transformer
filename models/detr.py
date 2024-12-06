@@ -56,11 +56,11 @@ class DETR(nn.Module):
         """
         features, pos = self.backbone(images)
 
-        src, mask_img = features[-1].decompose()
-        assert mask_img is not None
-        encoder_embed = self.input_proj(src)
+        #src, mask_img = features[-1].decompose()
+        #assert mask_img is not None
+        encoder_embed = self.input_proj(features)
         decoder_embed = self.query_embed(queries)
-        hs = self.transformer(encoder_embed, mask_img, decoder_embed, pos[-1])[0]
+        hs = self.transformer(encoder_embed, decoder_embed, pos)[0]
 
         outputs_objectness = self.class_embed(hs).sigmoid()
         outputs_objectness = outputs_objectness.permute(1, 0, 2).squeeze(dim=-1)
