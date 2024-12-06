@@ -56,7 +56,6 @@ class FrozenBatchNorm2d(torch.nn.Module):
 
 
 class BackboneBase(nn.Module):
-
     def __init__(self, backbone: nn.Module, train_backbone: bool, num_channels: int, return_interm_layers: bool):
         super().__init__()
         for name, parameter in backbone.named_parameters():
@@ -92,8 +91,8 @@ class Joiner(nn.Sequential):
         super().__init__(backbone, position_embedding)
 
     def forward(self, img):
-        xs = self[0](img)
-        pos = self[1](xs) # create pos embedding for image
+        xs = self[0](img) # Get Backbone output Fmap
+        pos = self[1](xs) # create pos embedding for fmap
 
         return xs, pos
 

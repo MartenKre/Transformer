@@ -49,12 +49,11 @@ class Transformer(nn.Module):
         bs, c, h, w = src.shape
         src = src.flatten(2).permute(2, 0, 1)
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
-        query_embed = query_embed.permute(1, 0, 2)  # from NxSxHD to SxNxHD
-        query_mask = query_mask.permute(1, 0 ,2)
+        query_embed = query_embed.permute(1, 0, 2)  # from NxSxH to SxNxH
 
         memory = self.encoder(src, pos=pos_embed)
-        hs = self.decoder(query_embed, memory, pos=pos_embed, target_key_padding_mask=query_mask)
-        return hs, memory.permute(1, 2, 0).view(bs, c, h, w)
+        hs = self.decoder(query_embed, memory, pos=pos_embed, tgt_key_padding_mask=query_mask)
+        return hs.transpose(1,2), memory.permute(1, 2, 0).view(bs, c, h, w)
 
 
 class TransformerEncoder(nn.Module):
@@ -95,8 +94,7 @@ class TransformerDecoder(nn.Module):
                 memory_mask: Optional[Tensor] = None,
                 tgt_key_padding_mask: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None,
-                pos: Optional[Tensor] = None,
-                query_pos: Optional[Tensor] = None):
+                pos: Optional[Tensor] = None):
         output = tgt
 
         intermediate = []
@@ -106,7 +104,7 @@ class TransformerDecoder(nn.Module):
                            memory_mask=memory_mask,
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,
-                           pos=pos, query_pos=query_pos)
+                           pos=pos)
             if self.return_intermediate:
                 intermediate.append(self.norm(output))
 

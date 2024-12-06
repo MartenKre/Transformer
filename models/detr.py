@@ -56,17 +56,22 @@ class DETR(nn.Module):
         """
         features, pos = self.backbone(images)
 
-        #src, mask_img = features[-1].decompose()
-        #assert mask_img is not None
         encoder_embed = self.input_proj(features)
         decoder_embed = self.query_embed(queries)
-        hs = self.transformer(encoder_embed, decoder_embed, pos)[0]
 
-        outputs_objectness = self.class_embed(hs).sigmoid()
-        outputs_objectness = outputs_objectness.permute(1, 0, 2).squeeze(dim=-1)
+        hs = self.transformer(encoder_embed, decoder_embed, pos, queries_mask)[0] # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
+
+        outputs_objectness = self.class_embed(hs).sigmoid().squeeze(dim=-1)
         outputs_coord = self.bbox_embed(hs).sigmoid()
-        outputs_coord = outputs_coord.permute(1, 0, 2)
-        out = {'pred_logits': outputs_objectness[:,-1], 'pred_boxes': outputs_coord[:,-1]}
+
+        print("Detr:")
+        print("fmaps", features.shape)
+        print("pos", pos.shape)
+        print("hs", hs.shape)
+        print("output obj:", outputs_objectness.shape)
+        print("output box:", outputs_coord.shape)
+        
+        out = {'pred_logits': outputs_objectness[-1], 'pred_boxes': outputs_coord[-1]}
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_objectness, outputs_coord)
         return out
@@ -111,7 +116,7 @@ class SetCriterion(nn.Module):
         targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
 
         loss_ce = F.binary_cross_entropy(src_logits, targets, reduction='none')
-        loss_ce = loss_ce[queries_mask].sum() /  num_q.sum()     # compute mean loss (only for non padded elements)
+        loss_ce = loss_ce[queries_mask].sum() /  num_q     # compute mean loss (only for non padded elements)
         losses = {'loss_bce': loss_ce}
         return losses
 
@@ -154,7 +159,6 @@ class SetCriterion(nn.Module):
         """
         outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs'}
 
-
         # Compute the average number of target boxes accross all nodes, for normalization purposes
         num_l = labels_mask.sum()
         if is_dist_avail_and_initialized():
@@ -169,12 +173,15 @@ class SetCriterion(nn.Module):
 
         # Compute all the requested losses
         losses = {}
+        print("Loss")
+        print([v.shape for k,v in outputs_without_aux.items()])
         for loss in self.losses:
-            losses.update(self.get_loss(loss, outputs, labels, queries_mask, labels_mask, num_q, num_l))
+            losses.update(self.get_loss(loss, outputs_without_aux, labels, queries_mask, labels_mask, num_q, num_l))
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if 'aux_outputs' in outputs:
             for i, aux_outputs in enumerate(outputs['aux_outputs']):
+                print(i, aux_outputs.shape)
                 for loss in self.losses:
                     l_dict = self.get_loss(loss, aux_outputs, labels, queries_mask, labels_mask, num_q, num_l)
                     l_dict = {k + f'_{i}': v for k, v in l_dict.items()}

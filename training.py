@@ -5,13 +5,15 @@ import json
 import math
 import sys
 
+from torch._prims_common import check_pin_memory
+
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader, DistributedSampler
 from models.detr import DETR, SetCriterion, PostProcess
 from models.transformer import Transformer
 from models.backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
-from util.misc import is_main_process, save_on_master, reduce_dict
+from util.misc import is_main_process, save_on_master, reduce_dict, BasicLogger
 
 
 def init_position_encoding(hidden_dim):
@@ -21,12 +23,12 @@ def init_position_encoding(hidden_dim):
     return position_embedding
 
 
-def init_backbone(lr_backbone, hidden_dim, masks=False, backbone='resnet50', dilation=True):
+def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
     # masks are only used for image segmentation
 
     position_embedding = init_position_encoding(hidden_dim)
     train_backbone = lr_backbone > 0
-    return_interm_layers = masks
+    return_interm_layers = False
     backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
     model = Joiner(backbone, position_embedding)
     model.num_channels = backbone.num_channels
@@ -51,12 +53,23 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     model.train()
     criterion.train()
 
+    logger = BasicLogger(delimiter = "   ")
+
     for images, queries, labels, queries_mask, labels_mask in data_loader:
         images = images.to(device)
         queries = queries.to(device)
+        queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
         labels = labels.to(device)
         queries_mask = queries_mask.to(device)
         labels_mask = labels_mask.to(device)
+
+        print("Inputs")
+        print(images.shape)
+        print(queries.shape)
+        print(labels.shape)
+        print(queries_mask.shape)
+        print(labels_mask.shape)
+        print("----------------")
 
         outputs = model(images, queries, queries_mask)
         loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
@@ -84,13 +97,10 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         optimizer.step()
 
-        metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
-        metric_logger.update(class_error=loss_dict_reduced['class_error'])
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
+        logger.update(lr=optimizer.param_groups[0]["lr"])
     # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: v for k, v in logger.entries.items()}
     
 
 ###########
@@ -147,6 +157,8 @@ model = DETR(
     input_dim_gt=2,
     aux_loss=True,
 )
+model.to(device)
+
 model_without_ddp = model
 if distributed:
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
@@ -192,13 +204,15 @@ else:
 
 #batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, batch_size, drop_last=True)
 #data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train, collate_fn=collate_fn, num_workers=num_workers)
-data_loader_train = DataLoader(dataset_train, sampler=sampler_train, collate_fn=collate_fn, num_workers=num_workers)
+data_loader_train = DataLoader(dataset_train, batch_size, sampler=sampler_train, collate_fn=collate_fn, num_workers=num_workers)
 data_loader_val = DataLoader(dataset_val, batch_size, sampler=sampler_val, drop_last=False, collate_fn=collate_fn, num_workers=num_workers)
 
 
 # load init weights if performing transfer learning
 if transfer_learning:
     checkpoint = torch.load(path_to_weights, map_location='cpu')
+    del checkpoint['model']['class_embed.weight']
+    del checkpoint['model']['class_embed.bias']
     model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
     if load_optim_state:
         if 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
@@ -225,30 +239,29 @@ for epoch in range(start_epoch, epochs):
                     'optimizer': optimizer.state_dict(),
                     'lr_scheduler': lr_scheduler.state_dict(),
                     'epoch': epoch,
-                    'args': args,
                 }, checkpoint_path)
 
-        test_stats, coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, device, output_dir
-        )
-
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch,
-                     'n_parameters': n_parameters}
-
-        if output_dir and is_main_process():
-            with (output_dir / "log.txt").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
-
-            # for evaluation logs
-            (output_dir / 'eval').mkdir(exist_ok=True)
-            filenames = ['latest.pth']
-            if epoch % 50 == 0:
-                filenames.append(f'{epoch:03}.pth')
-            for name in filenames:
-                torch.save(coco_evaluator.coco_eval["bbox"].eval,
-                            output_dir / "eval" / name)
+        # test_stats, coco_evaluator = evaluate(
+        #     model, criterion, postprocessors, data_loader_val, device, output_dir
+        # )
+        #
+        # log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+        #              **{f'test_{k}': v for k, v in test_stats.items()},
+        #              'epoch': epoch,
+        #              'n_parameters': n_parameters}
+        #
+        # if output_dir and is_main_process():
+        #     with (output_dir / "log.txt").open("a") as f:
+        #         f.write(json.dumps(log_stats) + "\n")
+        #
+        #     # for evaluation logs
+        #     (output_dir / 'eval').mkdir(exist_ok=True)
+        #     filenames = ['latest.pth']
+        #     if epoch % 50 == 0:
+        #         filenames.append(f'{epoch:03}.pth')
+        #     for name in filenames:
+        #         torch.save(coco_evaluator.coco_eval["bbox"].eval,
+        #                     output_dir / "eval" / name)
 
 total_time = time.time() - start_time
 total_time_str = str(time.datetime.timedelta(seconds=int(total_time)))

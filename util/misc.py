@@ -156,6 +156,35 @@ def reduce_dict(input_dict, average=True):
     return reduced_dict
 
 
+class BasicLogger():
+    def __init__(self, delimiter="\t"):
+        self.entries = {}
+        self.delimiter = delimiter
+
+    def update(self, **kwargs):
+        for k, v in kwargs.items():
+            if isinstance(v, torch.Tensor):
+                v = v.item()
+            assert isinstance(v, (float, int))
+            self.entries[k] = v
+    
+    def __getattr__(self, attr):
+        if attr in self.entries:
+            return self.entries[attr]
+        if attr in self.__dict__:
+            return self.__dict__[attr]
+        raise AttributeError("'{}' object has no attribute '{}'".format(
+            type(self).__name__, attr))
+
+    def __str__(self):
+        loss_str = []
+        for name, meter in self.entries.items():
+            loss_str.append(
+                "{}: {}".format(name, str(meter))
+            )
+        return self.delimiter.join(loss_str)
+
+
 class MetricLogger(object):
     def __init__(self, delimiter="\t"):
         self.meters = defaultdict(SmoothedValue)
