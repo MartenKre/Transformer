@@ -61,16 +61,9 @@ class DETR(nn.Module):
 
         hs = self.transformer(encoder_embed, decoder_embed, pos, queries_mask)[0] # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
 
-        outputs_objectness = self.class_embed(hs).sigmoid().squeeze(dim=-1)
-        outputs_coord = self.bbox_embed(hs).sigmoid()
+        outputs_objectness = self.class_embed(hs).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
+        outputs_coord = self.bbox_embed(hs).sigmoid() # [Num_Decoding, N, Seq_len, 4]
 
-        print("Detr:")
-        print("fmaps", features.shape)
-        print("pos", pos.shape)
-        print("hs", hs.shape)
-        print("output obj:", outputs_objectness.shape)
-        print("output box:", outputs_coord.shape)
-        
         out = {'pred_logits': outputs_objectness[-1], 'pred_boxes': outputs_coord[-1]}
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_objectness, outputs_coord)
@@ -82,7 +75,7 @@ class DETR(nn.Module):
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
         return [{'pred_logits': a, 'pred_boxes': b}
-            for a, b in zip(outputs_class[:,:-1], outputs_coord[:,:-1])]
+            for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
 
 
 class SetCriterion(nn.Module):
@@ -115,9 +108,9 @@ class SetCriterion(nn.Module):
         targets = torch.zeros_like(src_logits) 
         targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
 
-        loss_ce = F.binary_cross_entropy(src_logits, targets, reduction='none')
-        loss_ce = loss_ce[queries_mask].sum() /  num_q     # compute mean loss (only for non padded elements)
-        losses = {'loss_bce': loss_ce}
+        loss_bce = F.binary_cross_entropy(src_logits, targets, reduction='none')
+        loss_bce = loss_bce[queries_mask].sum() /  num_q     # compute mean loss (only for non padded elements)
+        losses = {'loss_bce': loss_bce}
         return losses
 
 
@@ -136,10 +129,10 @@ class SetCriterion(nn.Module):
         loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
         losses['loss_bbox'] = loss_bbox[labels_mask].sum() / num_l # filter loss based on elements than contain gt label
 
-        loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
-            box_ops.box_cxcywh_to_xyxy(src_boxes),
-            box_ops.box_cxcywh_to_xyxy(target_boxes)))
-        losses['loss_giou'] = loss_giou[labels_mask].sum() / num_l
+        src_xyxy = box_ops.box_cxcywh_to_xyxy(src_boxes).flatten(start_dim=0, end_dim=1)
+        target_xyxy = box_ops.box_cxcywh_to_xyxy(target_boxes).flatten(0, 1)
+        loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(src_xyxy,target_xyxy))
+        losses['loss_giou'] = loss_giou[labels_mask.flatten(0,1)].sum() / num_l
         return losses
 
     def get_loss(self, loss, outputs, labels, queries_mask, labels_mask, num_q, num_l):
@@ -173,15 +166,12 @@ class SetCriterion(nn.Module):
 
         # Compute all the requested losses
         losses = {}
-        print("Loss")
-        print([v.shape for k,v in outputs_without_aux.items()])
         for loss in self.losses:
             losses.update(self.get_loss(loss, outputs_without_aux, labels, queries_mask, labels_mask, num_q, num_l))
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if 'aux_outputs' in outputs:
             for i, aux_outputs in enumerate(outputs['aux_outputs']):
-                print(i, aux_outputs.shape)
                 for loss in self.losses:
                     l_dict = self.get_loss(loss, aux_outputs, labels, queries_mask, labels_mask, num_q, num_l)
                     l_dict = {k + f'_{i}': v for k, v in l_dict.items()}

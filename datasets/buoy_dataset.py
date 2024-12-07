@@ -10,14 +10,15 @@ import cv2
 
 
 def collate_fn(batch):
-    img, queries, labels, queries_mask, labels_mask = zip(*batch)
+    img, queries, labels, queries_mask, labels_mask, name = zip(*batch)
     img = torch.stack(img, dim=0)
     pad_q = pad_sequence(queries, batch_first=True, padding_value = 0.0)
     pad_l = pad_sequence(labels, batch_first=True, padding_value = 0.0)
     pad_mask_q = pad_sequence(queries_mask, batch_first=True, padding_value=False)
     pad_mask_l = pad_sequence(labels_mask, batch_first=True, padding_value=False)
+
     
-    return img, pad_q, pad_l, pad_mask_q, pad_mask_l
+    return img, pad_q, pad_l, pad_mask_q, pad_mask_l, name
     
 
 class BuoyDataset(Dataset):
@@ -95,6 +96,8 @@ class BuoyDataset(Dataset):
         else:
             img = torch.tensor(img).permute(2, 0, 1) / 255
 
-        sample = (img, queries, labels_extended, queries_mask, labels_mask)
+        name = os.path.join(self.data_path, "images", self.images[index])
+
+        sample = (img, queries, labels_extended, queries_mask, labels_mask, name)
         return sample
         

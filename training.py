@@ -55,7 +55,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
 
     logger = BasicLogger(delimiter = "   ")
 
-    for images, queries, labels, queries_mask, labels_mask in data_loader:
+    for images, queries, labels, queries_mask, labels_mask, name in data_loader:
         images = images.to(device)
         queries = queries.to(device)
         queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
@@ -63,18 +63,19 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
         queries_mask = queries_mask.to(device)
         labels_mask = labels_mask.to(device)
 
-        print("Inputs")
-        print(images.shape)
-        print(queries.shape)
-        print(labels.shape)
-        print(queries_mask.shape)
-        print(labels_mask.shape)
-        print("----------------")
+        # print("Inputs")
+        # print(name)
+        # print(images.shape)
+        # print(queries.shape)
+        # print(labels.shape)
+        # print(queries_mask.shape)
+        # print(labels_mask.shape)
+        # print("----------------")
 
         outputs = model(images, queries, queries_mask)
         loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
         weight_dict = criterion.weight_dict
-        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = reduce_dict(loss_dict)
@@ -113,6 +114,7 @@ load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
 path_to_weights = r"/home/marten/Uni/Semester_4/src/Transformer/detr-r50-e632da11.pth" 
 output_dir = "run1"
+shuffle = False     # Shuffling during training: False for debugging
 
 # Backbone
 lr_backbone = 1e-4
@@ -196,7 +198,7 @@ dataset_train = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingd
 dataset_val = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml", mode='val')
 
 if distributed:
-    sampler_train = DistributedSampler(dataset_train)
+    sampler_train = DistributedSampler(dataset_train, shuffle=shuffle)
     sampler_val = DistributedSampler(dataset_val, shuffle=False)
 else:
     sampler_train = torch.utils.data.RandomSampler(dataset_train)
