@@ -111,6 +111,11 @@ class SetCriterion(nn.Module):
         loss_bce = F.binary_cross_entropy(src_logits, targets, reduction='none')
         loss_bce = loss_bce[queries_mask].sum() /  num_q     # compute mean loss (only for non padded elements)
         losses = {'loss_bce': loss_bce}
+
+        # def capture_gradient(grad):
+        #     print("Labels Bprob: ", grad)
+        # src_logits.register_hook(capture_gradient)
+
         return losses
 
 
@@ -129,10 +134,20 @@ class SetCriterion(nn.Module):
         loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
         losses['loss_bbox'] = loss_bbox[labels_mask].sum() / num_l # filter loss based on elements than contain gt label
 
+        # def capture_gradient(grad):
+        #     print("BBox Bprob: ", grad)
+        # src_boxes.register_hook(capture_gradient)
+
         src_xyxy = box_ops.box_cxcywh_to_xyxy(src_boxes).flatten(start_dim=0, end_dim=1)
         target_xyxy = box_ops.box_cxcywh_to_xyxy(target_boxes).flatten(0, 1)
         loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(src_xyxy,target_xyxy))
         losses['loss_giou'] = loss_giou[labels_mask.flatten(0,1)].sum() / num_l
+
+
+        # def capture_gradient(grad):
+        #     print("Giou Bprob: ", grad)
+        # src_xyxy.register_hook(capture_gradient)
+
         return losses
 
     def get_loss(self, loss, outputs, labels, queries_mask, labels_mask, num_q, num_l):

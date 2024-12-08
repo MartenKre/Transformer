@@ -48,13 +48,13 @@ def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, d
     )
 
 
-def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm = 0):
-
+def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm = 0.1):
+    print("Train:")
     model.train()
     criterion.train()
 
     logger = BasicLogger(delimiter = "   ")
-
+    loss_print = []
     for images, queries, labels, queries_mask, labels_mask, name in data_loader:
         images = images.to(device)
         queries = queries.to(device)
@@ -63,7 +63,6 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
         queries_mask = queries_mask.to(device)
         labels_mask = labels_mask.to(device)
 
-        # print("Inputs")
         # print(name)
         # print(images.shape)
         # print(queries.shape)
@@ -76,6 +75,10 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
         loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+        loss_print.append(losses.item())
+        if len(loss_print) == 20:
+            print("\t\t", sum(loss_print) / len(loss_print))
+            loss_print = []
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = reduce_dict(loss_dict)
@@ -94,9 +97,33 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
 
         optimizer.zero_grad()
         losses.backward()
+
+        #print("Loss: ", losses)
+        gradients = []
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                gradients.append(param.grad.flatten())
+        #print("Max Grad: ", torch.max(torch.cat(gradients)))
+        #print("Max Norm: ", torch.norm(torch.cat(gradients)))
+        # for name, param in model.named_parameters():
+        #     if param.grad is not None:
+        #         print(f"Layer {name}: ", torch.max(param.grad))
+
+
+        # for name, param in model.named_parameters():
+        #     if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+        #         print(f"Before Clipping: NaN/Inf in gradients of {name}")
+
         if max_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
+
+        #print(model.class_embed.weight.grad)
         optimizer.step()
+
+        for name, param in model.named_parameters():
+            if param.grad is not None and torch.isnan(param.grad).any():
+                print(f"NaN in gradients of {name}")
+
 
         logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
         logger.update(lr=optimizer.param_groups[0]["lr"])
@@ -104,20 +131,57 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     return {k: v for k, v in logger.entries.items()}
     
 
+@torch.no_grad()
+def evaluate(model, criterion, data_loader, device):
+    print("Eval:")
+    model.eval()
+    criterion.eval()
+    logger = BasicLogger(delimiter = "   ")
+
+    loss_print = []
+    for images, queries, labels, queries_mask, labels_mask, name in data_loader:
+        images = images.to(device)
+        queries = queries.to(device)
+        queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
+        labels = labels.to(device)
+        queries_mask = queries_mask.to(device)
+        labels_mask = labels_mask.to(device)
+
+        outputs = model(images, queries, queries_mask)
+        loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
+        weight_dict = criterion.weight_dict
+        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+
+        # reduce losses over all GPUs for logging purposes
+        loss_dict_reduced = reduce_dict(loss_dict)
+        loss_dict_reduced_scaled = {k: v * weight_dict[k]
+                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
+        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
+                                      for k, v in loss_dict_reduced.items()}
+        losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
+        loss_value = losses_reduced_scaled.item()
+
+        loss_print.append(losses.item())
+        if len(loss_print) == 20:
+            print("\t\t", sum(loss_print) / len(loss_print))
+            loss_print = []
+        logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
+
+    return {k: v for k, v in logger.entries.items()}
+
 ###########
 # Settings
 ###########
 
 # general
-transfer_learning = True    # Loads prev provided weights
+transfer_learning = False    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
 path_to_weights = r"/home/marten/Uni/Semester_4/src/Transformer/detr-r50-e632da11.pth" 
 output_dir = "run1"
-shuffle = False     # Shuffling during training: False for debugging
 
 # Backbone
-lr_backbone = 1e-4
+lr_backbone = 1e-5
 
 # Transformer
 hidden_dim = 256    # embedding dim
@@ -130,18 +194,18 @@ pre_norm = True     # apply norm pre or post tranformer layer
 input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
 
 # Multi GPU
-device = torch.device('cuda' if torch.cuda.is_available() else 'cup')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#device = torch.device('cpu')
 distributed = False
 gpu = ['0','1','2','3']
 
 # Loss
-aux_loss = True 
+aux_loss = True
 bbox_loss_coef = 2
 giou_loss_coef = 5
 
 # Optimizer / DataLoader
 lr = 1e-4
-lr_backbonet=1e-5
 batch_size=2
 weight_decay=1e-4
 epochs=300
@@ -157,9 +221,9 @@ model = DETR(
     backbone,
     transformer,
     input_dim_gt=2,
-    aux_loss=True,
+    aux_loss=aux_loss,
 )
-model.to(device)
+model.to(device).float()
 
 model_without_ddp = model
 if distributed:
@@ -198,7 +262,7 @@ dataset_train = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingd
 dataset_val = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml", mode='val')
 
 if distributed:
-    sampler_train = DistributedSampler(dataset_train, shuffle=shuffle)
+    sampler_train = DistributedSampler(dataset_train, shuffle=True)
     sampler_val = DistributedSampler(dataset_val, shuffle=False)
 else:
     sampler_train = torch.utils.data.RandomSampler(dataset_train)
@@ -225,45 +289,45 @@ if transfer_learning:
 print("Start training")
 start_time = time.time()
 for epoch in range(start_epoch, epochs):
-        if distributed:
-            sampler_train.set_epoch(epoch)
-        train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm)
-        lr_scheduler.step()
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            checkpoint_paths = [output_dir / 'checkpoint.pth']
-            # extra checkpoint before LR drop and every 100 epochs
-            if (epoch + 1) % lr_drop == 0 or (epoch + 1) % 100 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
-            for checkpoint_path in checkpoint_paths:
-                save_on_master({
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'lr_scheduler': lr_scheduler.state_dict(),
-                    'epoch': epoch,
-                }, checkpoint_path)
+    print("Epoch: ", epoch)
 
-        # test_stats, coco_evaluator = evaluate(
-        #     model, criterion, postprocessors, data_loader_val, device, output_dir
-        # )
-        #
-        # log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-        #              **{f'test_{k}': v for k, v in test_stats.items()},
-        #              'epoch': epoch,
-        #              'n_parameters': n_parameters}
-        #
-        # if output_dir and is_main_process():
-        #     with (output_dir / "log.txt").open("a") as f:
-        #         f.write(json.dumps(log_stats) + "\n")
-        #
-        #     # for evaluation logs
-        #     (output_dir / 'eval').mkdir(exist_ok=True)
-        #     filenames = ['latest.pth']
-        #     if epoch % 50 == 0:
-        #         filenames.append(f'{epoch:03}.pth')
-        #     for name in filenames:
-        #         torch.save(coco_evaluator.coco_eval["bbox"].eval,
-        #                     output_dir / "eval" / name)
+    if distributed:
+        sampler_train.set_epoch(epoch)
+    train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm)
+    lr_scheduler.step()
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        checkpoint_paths = [os.path.join(output_dir, 'checkpoint.pth')]
+        # extra checkpoint before LR drop and every 100 epochs
+        if (epoch + 1) % lr_drop == 0 or (epoch + 1) % 100 == 0:
+            checkpoint_paths.append(os.path.join(output_dir, f'checkpoint{epoch:04}.pth'))
+        for checkpoint_path in checkpoint_paths:
+            save_on_master({
+                'model': model_without_ddp.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+                'epoch': epoch,
+            }, checkpoint_path)
+
+    test_stats = evaluate(model, criterion, data_loader_val, device)
+    #
+    # log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+    #              **{f'test_{k}': v for k, v in test_stats.items()},
+    #              'epoch': epoch,
+    #              'n_parameters': n_parameters}
+    #
+    # if output_dir and is_main_process():
+    #     with (output_dir / "log.txt").open("a") as f:
+    #         f.write(json.dumps(log_stats) + "\n")
+    #
+    #     # for evaluation logs
+    #     (output_dir / 'eval').mkdir(exist_ok=True)
+    #     filenames = ['latest.pth']
+    #     if epoch % 50 == 0:
+    #         filenames.append(f'{epoch:03}.pth')
+    #     for name in filenames:
+    #         torch.save(coco_evaluator.coco_eval["bbox"].eval,
+    #                     output_dir / "eval" / name)
 
 total_time = time.time() - start_time
 total_time_str = str(time.datetime.timedelta(seconds=int(total_time)))

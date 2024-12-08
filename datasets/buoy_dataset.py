@@ -83,6 +83,10 @@ class BuoyDataset(Dataset):
         if labels.ndim == 1:
             labels = labels.unsqueeze(0)
 
+        # normalize query inputs (dist and angle)
+        queries[..., 1] = queries[..., 1] / 1000
+        queries[..., 2] = queries[..., 1] / torch.pi
+
         labels_extended = torch.zeros(queries.size(dim=0), 5, dtype=torch.float32)
         labels_extended[labels[:, 0].int(), :] = labels[:, :]
 
