@@ -2,7 +2,7 @@
 
 import os
 import json
-from os.path import exists
+from os.path import exists, isdir
 import geojson
 import numpy as np
 import pyproj
@@ -161,12 +161,11 @@ def filterBuoys(ship_pose, buoyCoords, fov_with_padding=110, dist_thresh=1000, n
 
 def getIMUData(path):
     # function returns IMU data as list
-
     if os.path.isfile(path):
         result = []
         with open(path, 'r') as f:
             data = f.readlines()
-            for line in data:
+            for i, line in enumerate(data):
                 content = line.split(",")
                 line = [float(x) for x in content]
                 result.append(line)
@@ -215,8 +214,10 @@ def labelsJSON2Yolo(labels, queries):
             distances = list(map(lambda x: haversineDist(lat_BB, lng_BB, x[2], x[3]), queries))
             queryID = np.argmin(distances)
             if distances[queryID] > 30:
-                print("Warning: No distance between query Buoy and Label buoy exceeds thresh")
-                print(lat_BB, lng_BB, distances)
+                if verbose:
+                    print("\t \t Warning: No distance between query Buoy and Label buoy exceeds thresh")
+                    print(lat_BB, lng_BB, distances)
+                return None
            
             # get BB info in yolo format
             x1 = BB["x1"]
@@ -234,79 +235,95 @@ def labelsJSON2Yolo(labels, queries):
     return result 
 
 # Settings:
+mode = 'train' # train or test
+verbose = False
 resize_imgs = True
 resize_coeffs = [0.5, 0.5]
 target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1"
-data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/StPete_BuoysOnly/"
+data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/"
 os.makedirs(target_dir, exist_ok=True)
 
 buoyGTData = GetGeoData()
 
 # train data
-target_dir = os.path.join(target_dir, "train")
+if mode == 'train':
+    target_dir = os.path.join(target_dir, "train")
+if mode == 'test':
+    target_dir = os.path.join(target_dir, "test")
 os.makedirs(target_dir, exist_ok=True)
 os.makedirs(os.path.join(target_dir, "images"), exist_ok=True)
 os.makedirs(os.path.join(target_dir, "labels"), exist_ok=True)
 os.makedirs(os.path.join(target_dir, "queries"), exist_ok=True)
 sample_counter = 0
 
-# TODO: Add entire training folder (not only stpeteBuoysonly)
-# TODO Add test data
-
+datafolders = []
 for folder in os.listdir(data_path):
-    folder_path = os.path.join(data_path, folder)
-    images = os.path.join(folder_path, "images")
-    imu = os.listdir(os.path.join(folder_path, "imu"))[0]
-    labels = os.path.join(folder_path, "labels")
-    imu_data = getIMUData(os.path.join(folder_path, "imu", imu)) 
+    if os.path.isdir(os.path.join(data_path, folder)):
+        if mode == 'train' and folder != 'Testdata' and folder != 'True_Negatives' and folder != "Boston_oak":
+            datafolders.append(folder)
+        elif mode == 'test' and folder == 'Testdata':
+            datafolders.append(folder)
 
-    print(f"Processing {folder}")
+print("Folders Found: ", sorted(datafolders))
 
-    for sample in os.listdir(images):
-        # copy image
-        src_path_img = os.path.join(images, sample)
-        sample_name = "0" * (5-len(list(str(sample_counter)))) + str(sample_counter)
-        dest_path = os.path.join(target_dir, "images", sample_name + '.png')
+for folder in datafolders:
+    parent_folder = os.path.join(data_path, folder)
+    for subfolder in os.listdir(parent_folder):
+        folder_path = os.path.join(parent_folder, subfolder)
+        print("Processing: " , folder_path)
+        images = os.path.join(folder_path, "images")
+        imu = os.listdir(os.path.join(folder_path, "imu"))[0]
+        labels = os.path.join(folder_path, "labels")
+        imu_data = getIMUData(os.path.join(folder_path, "imu", imu)) 
 
-        # create query file
-        frame_id = int(sample.split(".")[0]) - 1
-        imu_curr = imu_data[frame_id] 
-        ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
-        buoys_on_tile = buoyGTData.getBuoyLocations(ship_pose[0], ship_pose[1]) 
-        filteredGT = filterBuoys(ship_pose, buoys_on_tile)
-        queries = createQueryData(ship_pose, filteredGT)
-        if len(queries) == 0:
-            print(f"No nearby bouys found for file {src_path_img}")
-            print("Cannot generate queries -> Skipping")
-            continue
-        queryFile = os.path.join(target_dir, "queries", sample_name + '.txt')
+        for sample in os.listdir(images):
+            # copy image
+            src_path_img = os.path.join(images, sample)
+            sample_name = "0" * (5-len(list(str(sample_counter)))) + str(sample_counter)
+            dest_path = os.path.join(target_dir, "images", sample_name + '.png')
 
-        # create labels file
-        src_path = os.path.join(labels, sample+".json")
-        label_data = json.load(open(src_path, 'r'))
-        txtlabels = labelsJSON2Yolo(label_data, queries)
-        if len(txtlabels) == 0:
-            print(f"Skipping empty Labels file: {src_path}")
-            continue
-        labelfile = os.path.join(target_dir, "labels", sample_name + '.txt')
+            # create query file
+            frame_id = int(sample.split(".")[0]) - 1
+            imu_curr = imu_data[frame_id] 
+            ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
+            buoys_on_tile = buoyGTData.getBuoyLocations(ship_pose[0], ship_pose[1]) 
+            filteredGT = filterBuoys(ship_pose, buoys_on_tile)
+            queries = createQueryData(ship_pose, filteredGT)
+            if len(queries) == 0:
+                if verbose:
+                    print(f"\t \t Skipping: No nearby bouys found for file {src_path_img}")
+                continue
+            queryFile = os.path.join(target_dir, "queries", sample_name + '.txt')
+
+            # create labels file
+            src_path = os.path.join(labels, sample+".json")
+            label_data = json.load(open(src_path, 'r'))
+            txtlabels = labelsJSON2Yolo(label_data, queries)
+            if txtlabels is None:
+                continue
+            if len(txtlabels) == 0:
+                if verbose:
+                    print(f"\t \t skipping empty labels file: {src_path}")
+                continue
+            labelfile = os.path.join(target_dir, "labels", sample_name + '.txt')
 
 
-        # save data
-        if resize_imgs == False:
-            shutil.copy(src_path_img, dest_path)
-        else:
-            img = cv2.imread(src_path_img)
-            img_resized = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
-            cv2.imwrite(dest_path, img_resized)
-        
-        with open(queryFile, 'w') as f:
-            data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + " " + str(data[2]) + " " + str(data[3]) + "\n" for i,data in enumerate(queries)]
-            f.writelines(data)
+            # save data
+            if resize_imgs == False:
+                shutil.copy(src_path_img, dest_path)
+            else:
+                img = cv2.imread(src_path_img)
+                img_resized = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
+                cv2.imwrite(dest_path, img_resized)
+            
+            with open(queryFile, 'w') as f:
+                data = [str(i) + " " + str(data[0]) + " " + str(data[1]) + " " + str(data[2]) + " " + str(data[3]) + "\n" for i,data in enumerate(queries)]
+                f.writelines(data)
 
-        with open(labelfile, 'w') as f:
-            f.writelines(txtlabels)
-        sample_counter += 1
+            with open(labelfile, 'w') as f:
+                f.writelines(txtlabels)
+            sample_counter += 1
 
-    break
 
 print("DONE!")
+print("Total Processed: ", datafolders)
