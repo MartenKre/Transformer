@@ -4,7 +4,7 @@ DETR model and criterion classes.
 """
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import angle, nn
 
 from util import box_ops
 from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
@@ -32,8 +32,9 @@ class DETR(nn.Module):
         hidden_dim = transformer.d_model
         self.class_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
-        #self.query_embed = nn.Embedding(num_queries, hidden_dim)
-        self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
+        #self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
+        self.query_embed_1 = nn.Embedding(40, int(hidden_dim/input_dim_gt))
+        self.query_embed_2 = nn.Embedding(80, int(hidden_dim/input_dim_gt))
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
@@ -57,7 +58,10 @@ class DETR(nn.Module):
         features, pos = self.backbone(images)
 
         encoder_embed = self.input_proj(features)
-        decoder_embed = self.query_embed(queries)
+        #decoder_embed = self.query_embed(queries)
+        dist_input = (queries[...,0].clamp(min=0,max=1) * 1000) // 25
+        angle_input = ((queries[...,1].clamp(min=-1, max=1)+1) * 500) // 12.5
+        decoder_embed = torch.cat((self.query_embed_1(dist_input.int()), self.query_embed_2(angle_input.int())), dim = -1) # [N, Seq_len, 256] query embedding 
 
         hs = self.transformer(encoder_embed, decoder_embed, pos, queries_mask)[0] # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
 
@@ -108,13 +112,14 @@ class SetCriterion(nn.Module):
         targets = torch.zeros_like(src_logits) 
         targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
 
+        # print(src_logits)
+        # print(targets)
+        # print(labels_mask)
+        # print(queries_mask)
+        # print("------------------")
         loss_bce = F.binary_cross_entropy(src_logits, targets, reduction='none')
         loss_bce = loss_bce[queries_mask].sum() /  num_q     # compute mean loss (only for non padded elements)
         losses = {'loss_bce': loss_bce}
-
-        # def capture_gradient(grad):
-        #     print("Labels Bprob: ", grad)
-        # src_logits.register_hook(capture_gradient)
 
         return losses
 
@@ -134,19 +139,10 @@ class SetCriterion(nn.Module):
         loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
         losses['loss_bbox'] = loss_bbox[labels_mask].sum() / num_l # filter loss based on elements than contain gt label
 
-        # def capture_gradient(grad):
-        #     print("BBox Bprob: ", grad)
-        # src_boxes.register_hook(capture_gradient)
-
         src_xyxy = box_ops.box_cxcywh_to_xyxy(src_boxes).flatten(start_dim=0, end_dim=1)
         target_xyxy = box_ops.box_cxcywh_to_xyxy(target_boxes).flatten(0, 1)
         loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(src_xyxy,target_xyxy))
         losses['loss_giou'] = loss_giou[labels_mask.flatten(0,1)].sum() / num_l
-
-
-        # def capture_gradient(grad):
-        #     print("Giou Bprob: ", grad)
-        # src_xyxy.register_hook(capture_gradient)
 
         return losses
 

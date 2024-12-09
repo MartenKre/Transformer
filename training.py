@@ -4,6 +4,8 @@ import time
 import json
 import math
 import sys
+import tqdm
+import re
 
 from torch._prims_common import check_pin_memory
 
@@ -54,8 +56,12 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     criterion.train()
 
     logger = BasicLogger(delimiter = "   ")
-    loss_print = []
-    for images, queries, labels, queries_mask, labels_mask, name in data_loader:
+    loss_total = []
+    loss_obj = []
+    loss_boxL1 = []
+    loss_giou = []
+
+    for images, queries, labels, queries_mask, labels_mask, name in tqdm(data_loader, desc=f"Epoch: " + str(epoch)):
         images = images.to(device)
         queries = queries.to(device)
         queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
@@ -74,11 +80,14 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
         outputs = model(images, queries, queries_mask)
         loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
         weight_dict = criterion.weight_dict
-        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
-        loss_print.append(losses.item())
-        if len(loss_print) == 20:
-            print("\t\t", sum(loss_print) / len(loss_print))
-            loss_print = []
+        #losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+        losses = losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+        loss_total.append(losses.item())
+        loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k))
+        loss_boxL1.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k))
+        loss_giou.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k))
+        console_str = f"\t\t Loss: {sum(loss_total)/len(loss_total)} \t\t Loss Obj: {sum(loss_obj)/len(loss_obj)} \t\t Loss BoxL1: {sum(loss_boxL1)/len(loss_boxL1)} \t\t Loss Giou: {sum(loss_giou)/len(loss_giou)}"
+        tqdm.write(console_str)
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = reduce_dict(loss_dict)
@@ -98,21 +107,21 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
         optimizer.zero_grad()
         losses.backward()
 
-        #print("Loss: ", losses)
-        gradients = []
-        for name, param in model.named_parameters():
-            if param.grad is not None:
-                gradients.append(param.grad.flatten())
-        #print("Max Grad: ", torch.max(torch.cat(gradients)))
-        #print("Max Norm: ", torch.norm(torch.cat(gradients)))
+        # print("Loss: ", losses)
+        # gradients = []
         # for name, param in model.named_parameters():
         #     if param.grad is not None:
-        #         print(f"Layer {name}: ", torch.max(param.grad))
-
-
+        #         gradients.append(param.grad.flatten())
+        # print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))))
+        # print("Max Norm: ", torch.norm(torch.cat(gradients)))
         # for name, param in model.named_parameters():
-        #     if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
-        #         print(f"Before Clipping: NaN/Inf in gradients of {name}")
+        #     if param.grad is not None:
+        #         print(f"Layer {name}: ", torch.max(torch.abs(param.grad)))
+
+
+        for name, param in model.named_parameters():
+            if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                print(f"Before Clipping: NaN/Inf in gradients of {name}")
 
         if max_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
@@ -120,9 +129,9 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
         #print(model.class_embed.weight.grad)
         optimizer.step()
 
-        for name, param in model.named_parameters():
-            if param.grad is not None and torch.isnan(param.grad).any():
-                print(f"NaN in gradients of {name}")
+        # for name, param in model.named_parameters():
+        #     if param.grad is not None and torch.isnan(param.grad).any():
+        #         print(f"NaN in gradients of {name}")
 
 
         logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
@@ -138,8 +147,11 @@ def evaluate(model, criterion, data_loader, device):
     criterion.eval()
     logger = BasicLogger(delimiter = "   ")
 
-    loss_print = []
-    for images, queries, labels, queries_mask, labels_mask, name in data_loader:
+    loss_total = []
+    loss_obj = []
+    loss_boxL1 = []
+    loss_giou = []
+    for images, queries, labels, queries_mask, labels_mask, name in tqdm(data_loader):
         images = images.to(device)
         queries = queries.to(device)
         queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
@@ -150,7 +162,15 @@ def evaluate(model, criterion, data_loader, device):
         outputs = model(images, queries, queries_mask)
         loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
         weight_dict = criterion.weight_dict
-        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+        #losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+        losses = losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+
+        loss_total.append(round(losses.item(), 3))
+        loss_obj.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k).item(), 3))
+        loss_boxL1.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k).item(),3))
+        loss_giou.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k).item(),3))
+        console_str = f"\t\t Loss: {sum(loss_total)/len(loss_total)} \t\t Loss Obj: {sum(loss_obj)/len(loss_obj)} \t\t Loss BoxL1: {sum(loss_boxL1)/len(loss_boxL1)} \t\t Loss Giou: {sum(loss_giou)/len(loss_giou)}"
+        tqdm.write(console_str)
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = reduce_dict(loss_dict)
@@ -161,10 +181,6 @@ def evaluate(model, criterion, data_loader, device):
         losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
         loss_value = losses_reduced_scaled.item()
 
-        loss_print.append(losses.item())
-        if len(loss_print) == 20:
-            print("\t\t", sum(loss_print) / len(loss_print))
-            loss_print = []
         logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
 
     return {k: v for k, v in logger.entries.items()}
@@ -200,13 +216,13 @@ distributed = False
 gpu = ['0','1','2','3']
 
 # Loss
-aux_loss = True
+aux_loss = False
 bbox_loss_coef = 2
 giou_loss_coef = 5
 
 # Optimizer / DataLoader
 lr = 1e-4
-batch_size=2
+batch_size=1
 weight_decay=1e-4
 epochs=300
 lr_drop=200
@@ -223,7 +239,7 @@ model = DETR(
     input_dim_gt=2,
     aux_loss=aux_loss,
 )
-model.to(device).float()
+model.to(device)
 
 model_without_ddp = model
 if distributed:
@@ -276,6 +292,7 @@ data_loader_val = DataLoader(dataset_val, batch_size, sampler=sampler_val, drop_
 
 # load init weights if performing transfer learning
 if transfer_learning:
+    print("loading weights..")
     checkpoint = torch.load(path_to_weights, map_location='cpu')
     del checkpoint['model']['class_embed.weight']
     del checkpoint['model']['class_embed.bias']

@@ -214,11 +214,10 @@ class TransformerDecoderLayer(nn.Module):
 
         q = k = tgt
         tgt_mask = torch.tensor([tgt_mask])
-        # use tgt_key_padding_mask to ignore sequence padding
-        # careful!! True = Ignore, False = use
         tgt_key_padding_mask = ~tgt_key_padding_mask # flip target mask
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
+        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask)[0]
         tgt = tgt + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
         tgt2 = self.multihead_attn(query=tgt,
@@ -243,12 +242,14 @@ class TransformerDecoderLayer(nn.Module):
         tgt_key_padding_mask = ~tgt_key_padding_mask # flip target mask
         tgt2 = self.self_attn(q, k, v, attn_mask=tgt_mask, 
                               key_padding_mask=tgt_key_padding_mask)[0]
+
         tgt = tgt + self.dropout1(tgt2)
         tgt2 = self.norm2(tgt)
         tgt2 = self.multihead_attn(query=tgt2,
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
+
         tgt = tgt + self.dropout2(tgt2)
         tgt2 = self.norm3(tgt)
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
