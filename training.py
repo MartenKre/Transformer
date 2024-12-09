@@ -1,16 +1,14 @@
 import torch
 import os
 import time
-import json
 import math
 import sys
-import tqdm
-import re
+from tqdm import tqdm
 
 from torch._prims_common import check_pin_memory
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, dataloader
 from models.detr import DETR, SetCriterion, PostProcess
 from models.transformer import Transformer
 from models.backbone import Backbone, Joiner
@@ -51,7 +49,6 @@ def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, d
 
 
 def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm = 0.1):
-    print("Train:")
     model.train()
     criterion.train()
 
@@ -61,136 +58,107 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     loss_boxL1 = []
     loss_giou = []
 
-    for images, queries, labels, queries_mask, labels_mask, name in tqdm(data_loader, desc=f"Epoch: " + str(epoch)):
-        images = images.to(device)
-        queries = queries.to(device)
-        queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
-        labels = labels.to(device)
-        queries_mask = queries_mask.to(device)
-        labels_mask = labels_mask.to(device)
+    with tqdm(data_loader, desc=f"Train - Epoch" + str(epoch), ncols=180) as pbar:
+        for images, queries, labels, queries_mask, labels_mask, name in pbar:
+            images = images.to(device)
+            queries = queries.to(device)
+            queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
+            labels = labels.to(device)
+            queries_mask = queries_mask.to(device)
+            labels_mask = labels_mask.to(device)
 
-        # print(name)
-        # print(images.shape)
-        # print(queries.shape)
-        # print(labels.shape)
-        # print(queries_mask.shape)
-        # print(labels_mask.shape)
-        # print("----------------")
+            outputs = model(images, queries, queries_mask)
+            loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
+            weight_dict = criterion.weight_dict
 
-        outputs = model(images, queries, queries_mask)
-        loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
-        weight_dict = criterion.weight_dict
-        #losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
-        losses = losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
-        loss_total.append(losses.item())
-        loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k))
-        loss_boxL1.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k))
-        loss_giou.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k))
-        console_str = f"\t\t Loss: {sum(loss_total)/len(loss_total)} \t\t Loss Obj: {sum(loss_obj)/len(loss_obj)} \t\t Loss BoxL1: {sum(loss_boxL1)/len(loss_boxL1)} \t\t Loss Giou: {sum(loss_giou)/len(loss_giou)}"
-        tqdm.write(console_str)
+            losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+            loss_total.append(round(losses.item(),3))
+            loss_obj.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k).item(),3,))
+            loss_boxL1.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k).item(),3))
+            loss_giou.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k).item(),3))
+            tqdm_str = {"Loss": f"{round(sum(loss_total)/len(loss_total) ,3)}",
+                        "Loss Obj": f"{round(sum(loss_obj)/len(loss_obj), 3)}",
+                        "Loss BoxL1": f"{round(sum(loss_boxL1)/len(loss_boxL1), 3)}",
+                        "Loss Giou": f"{round(sum(loss_giou)/len(loss_giou),3)}"}
+            pbar.set_postfix(tqdm_str)
 
-        # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = reduce_dict(loss_dict)
-        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
-                                      for k, v in loss_dict_reduced.items()}
-        loss_dict_reduced_scaled = {k: v * weight_dict[k]
-                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
-        losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
+            loss_value = losses.item()
+            if not math.isfinite(loss_value):
+                print("Loss is {}, stopping training".format(loss_value))
+                sys.exit(1)
 
-        loss_value = losses_reduced_scaled.item()
+            optimizer.zero_grad()
+            losses.backward()
 
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            print(loss_dict_reduced)
-            sys.exit(1)
-
-        optimizer.zero_grad()
-        losses.backward()
-
-        # print("Loss: ", losses)
-        # gradients = []
-        # for name, param in model.named_parameters():
-        #     if param.grad is not None:
-        #         gradients.append(param.grad.flatten())
-        # print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))))
-        # print("Max Norm: ", torch.norm(torch.cat(gradients)))
-        # for name, param in model.named_parameters():
-        #     if param.grad is not None:
-        #         print(f"Layer {name}: ", torch.max(torch.abs(param.grad)))
+            # print("Loss: ", losses)
+            # gradients = []
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         gradients.append(param.grad.flatten())
+            # print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))))
+            # print("Max Norm: ", torch.norm(torch.cat(gradients)))
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         print(f"Layer {name}: ", torch.max(torch.abs(param.grad)))
 
 
-        for name, param in model.named_parameters():
-            if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
-                print(f"Before Clipping: NaN/Inf in gradients of {name}")
+            for name, param in model.named_parameters():
+                if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
+                    print(f"Before Clipping: NaN/Inf in gradients of {name}")
 
-        if max_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
+            if max_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
 
-        #print(model.class_embed.weight.grad)
-        optimizer.step()
+            #print(model.class_embed.weight.grad)
+            optimizer.step()
 
-        # for name, param in model.named_parameters():
-        #     if param.grad is not None and torch.isnan(param.grad).any():
-        #         print(f"NaN in gradients of {name}")
-
-
-        logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
-        logger.update(lr=optimizer.param_groups[0]["lr"])
-    # gather the stats from all processes
-    return {k: v for k, v in logger.entries.items()}
+    return {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
+            "loss_boxL1": sum(loss_boxL1/len(loss_boxL1)), "loss_giou": sum(loss_giou)/len(loss_giou)}
     
 
 @torch.no_grad()
 def evaluate(model, criterion, data_loader, device):
-    print("Eval:")
     model.eval()
     criterion.eval()
-    logger = BasicLogger(delimiter = "   ")
 
     loss_total = []
     loss_obj = []
     loss_boxL1 = []
     loss_giou = []
-    for images, queries, labels, queries_mask, labels_mask, name in tqdm(data_loader):
-        images = images.to(device)
-        queries = queries.to(device)
-        queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
-        labels = labels.to(device)
-        queries_mask = queries_mask.to(device)
-        labels_mask = labels_mask.to(device)
+    with tqdm(data_loader, desc=f"Val", ncols=180) as pbar:
+        for images, queries, labels, queries_mask, labels_mask, name in pbar:
+            images = images.to(device)
+            queries = queries.to(device)
+            queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
+            labels = labels.to(device)
+            queries_mask = queries_mask.to(device)
+            labels_mask = labels_mask.to(device)
 
-        outputs = model(images, queries, queries_mask)
-        loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
-        weight_dict = criterion.weight_dict
-        #losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
-        losses = losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+            outputs = model(images, queries, queries_mask)
+            loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
+            weight_dict = criterion.weight_dict
 
-        loss_total.append(round(losses.item(), 3))
-        loss_obj.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k).item(), 3))
-        loss_boxL1.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k).item(),3))
-        loss_giou.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k).item(),3))
-        console_str = f"\t\t Loss: {sum(loss_total)/len(loss_total)} \t\t Loss Obj: {sum(loss_obj)/len(loss_obj)} \t\t Loss BoxL1: {sum(loss_boxL1)/len(loss_boxL1)} \t\t Loss Giou: {sum(loss_giou)/len(loss_giou)}"
-        tqdm.write(console_str)
+            losses = losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
+            loss_total.append(losses.item())
+            loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k).item())
+            loss_boxL1.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k).item())
+            loss_giou.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k).item())
+            tqdm_str = {"Loss": f"{round(sum(loss_total)/len(loss_total) ,3)}",
+                        "Loss Obj": f"{round(sum(loss_obj)/len(loss_obj), 3)}",
+                        "Loss BoxL1": f"{round(sum(loss_boxL1)/len(loss_boxL1), 3)}",
+                        "Loss Giou": f"{round(sum(loss_giou)/len(loss_giou),3)}"}
+            pbar.set_postfix(tqdm_str)
 
-        # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = reduce_dict(loss_dict)
-        loss_dict_reduced_scaled = {k: v * weight_dict[k]
-                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
-        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
-                                      for k, v in loss_dict_reduced.items()}
-        losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
-        loss_value = losses_reduced_scaled.item()
 
-        logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
-
-    return {k: v for k, v in logger.entries.items()}
+    return {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
+            "loss_boxL1": sum(loss_boxL1/len(loss_boxL1)), "loss_giou": sum(loss_giou)/len(loss_giou)}
 
 ###########
 # Settings
 ###########
 
 # general
-transfer_learning = False    # Loads prev provided weights
+transfer_learning = True    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
 path_to_weights = r"/home/marten/Uni/Semester_4/src/Transformer/detr-r50-e632da11.pth" 
@@ -211,14 +179,12 @@ input_dim_gt = 2    # Amount of datapoints of a query object before being transf
 
 # Multi GPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#device = torch.device('cpu')
 distributed = False
-gpu = ['0','1','2','3']
 
 # Loss
-aux_loss = False
-bbox_loss_coef = 2
-giou_loss_coef = 5
+aux_loss = True
+bbox_loss_coef = 1
+giou_loss_coef = 0.5
 
 # Optimizer / DataLoader
 lr = 1e-4
@@ -243,7 +209,9 @@ model.to(device)
 
 model_without_ddp = model
 if distributed:
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
+    print("Distributed Training!")
+    print("Using ", torch.cuda.device_count(), " GPUs")
+    model = torch.nn.parallel.DataParallel(model)
     model_without_ddp = model.module
 n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print('number of params:', n_parameters)
@@ -277,15 +245,16 @@ lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_drop)
 dataset_train = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml", mode='train')
 dataset_val = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml", mode='val')
 
-if distributed:
-    sampler_train = DistributedSampler(dataset_train, shuffle=True)
-    sampler_val = DistributedSampler(dataset_val, shuffle=False)
-else:
-    sampler_train = torch.utils.data.RandomSampler(dataset_train)
-    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+# if distributed:
+#     sampler_train = DistributedSampler(dataset_train, shuffle=True)
+#     sampler_val = DistributedSampler(dataset_val, shuffle=False)
+# else:
+#     sampler_train = torch.utils.data.RandomSampler(dataset_train)
+#     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-#batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, batch_size, drop_last=True)
-#data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train, collate_fn=collate_fn, num_workers=num_workers)
+sampler_train = torch.utils.data.RandomSampler(dataset_train)
+sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+
 data_loader_train = DataLoader(dataset_train, batch_size, sampler=sampler_train, collate_fn=collate_fn, num_workers=num_workers)
 data_loader_val = DataLoader(dataset_val, batch_size, sampler=sampler_val, drop_last=False, collate_fn=collate_fn, num_workers=num_workers)
 
@@ -303,11 +272,11 @@ if transfer_learning:
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             start_epoch = checkpoint['epoch'] + 1
 
+
 print("Start training")
 start_time = time.time()
+best_loss = math.inf
 for epoch in range(start_epoch, epochs):
-    print("Epoch: ", epoch)
-
     if distributed:
         sampler_train.set_epoch(epoch)
     train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm)
@@ -326,25 +295,16 @@ for epoch in range(start_epoch, epochs):
                 'epoch': epoch,
             }, checkpoint_path)
 
-    test_stats = evaluate(model, criterion, data_loader_val, device)
-    #
-    # log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-    #              **{f'test_{k}': v for k, v in test_stats.items()},
-    #              'epoch': epoch,
-    #              'n_parameters': n_parameters}
-    #
-    # if output_dir and is_main_process():
-    #     with (output_dir / "log.txt").open("a") as f:
-    #         f.write(json.dumps(log_stats) + "\n")
-    #
-    #     # for evaluation logs
-    #     (output_dir / 'eval').mkdir(exist_ok=True)
-    #     filenames = ['latest.pth']
-    #     if epoch % 50 == 0:
-    #         filenames.append(f'{epoch:03}.pth')
-    #     for name in filenames:
-    #         torch.save(coco_evaluator.coco_eval["bbox"].eval,
-    #                     output_dir / "eval" / name)
+    val_stats = evaluate(model, criterion, data_loader_val, device)
+    if output_dir:
+        if val_stats["loss_total"] < best_loss:
+            best_loss = val_stats["loss_total"]
+            save_on_master({
+                'model': model_without_ddp.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+                'epoch': epoch,
+            }, os.path.join(output_dir, "best.pth"))
 
 total_time = time.time() - start_time
 total_time_str = str(time.datetime.timedelta(seconds=int(total_time)))
