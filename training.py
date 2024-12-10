@@ -57,7 +57,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     loss_boxL1 = []
     loss_giou = []
 
-    with tqdm(data_loader, desc=f"Train - Epoch" + str(epoch), ncols=150) as pbar:
+    with tqdm(data_loader, desc=str(f"Train - Epoch {epoch}").ljust(15), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
             queries = queries.to(device)
@@ -89,26 +89,9 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             optimizer.zero_grad()
             losses.backward()
 
-            # print("Loss: ", losses)
-            # gradients = []
-            # for name, param in model.named_parameters():
-            #     if param.grad is not None:
-            #         gradients.append(param.grad.flatten())
-            # print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))).item())
-            # print("Max Norm: ", torch.norm(torch.cat(gradients)).item())
-            # for name, param in model.named_parameters():
-            #     if param.grad is not None:
-            #         print(f"Layer {name}: ", torch.max(torch.abs(param.grad)).item())
-
-
-            for name, param in model.named_parameters():
-                if param.grad is not None and (torch.isnan(param.grad).any() or torch.isinf(param.grad).any()):
-                    print(f"Before Clipping: NaN/Inf in gradients of {name}")
-
             if max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
 
-            #print(model.class_embed.weight.grad)
             optimizer.step()
 
     return {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
@@ -116,7 +99,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     
 
 @torch.no_grad()
-def evaluate(model, criterion, data_loader, device):
+def evaluate(model, criterion, data_loader, device, epoch=""):
     model.eval()
     criterion.eval()
 
@@ -125,7 +108,7 @@ def evaluate(model, criterion, data_loader, device):
     loss_boxL1 = []
     loss_giou = []
     stats = {k: 0 for k in ["p","n","tp","fp","tn","fn"]}
-    with tqdm(data_loader, desc=f"Val", ncols=150) as pbar:
+    with tqdm(data_loader, desc=str(f"Val - Epoch {epoch}").ljust(15), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
             queries = queries.to(device)
@@ -169,7 +152,7 @@ transfer_learning = True    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
 path_to_weights = r"detr-r50-e632da11.pth" 
-output_dir = "run1"
+output_dir = "test"
 
 # Backbone
 lr_backbone = 1e-5
@@ -201,7 +184,7 @@ giou_loss_coef = 1
 
 # Optimizer / DataLoader
 lr = 1e-4
-batch_size=2
+batch_size=8
 if distributed:
     batch_size = 2*torch.cuda.device_count()
 weight_decay=1e-3
@@ -226,7 +209,7 @@ model.to(device)
 
 model_without_ddp = model
 if distributed:
-    print("Distributed Training!")
+    print("Training on multiple GPUs!")
     print("Using ", torch.cuda.device_count(), " GPUs")
     print("Batch Size:", batch_size)
     model = torch.nn.parallel.DataParallel(model)
@@ -263,13 +246,6 @@ lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_drop)
 dataset_train = BuoyDataset(yaml_file=path_to_dataset, mode='train')
 dataset_val = BuoyDataset(yaml_file=path_to_dataset, mode='val')
 
-# if distributed:
-#     sampler_train = DistributedSampler(dataset_train, shuffle=True)
-#     sampler_val = DistributedSampler(dataset_val, shuffle=False)
-# else:
-#     sampler_train = torch.utils.data.RandomSampler(dataset_train)
-#     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-
 sampler_train = torch.utils.data.RandomSampler(dataset_train)
 sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
@@ -291,28 +267,21 @@ if transfer_learning:
             start_epoch = checkpoint['epoch'] + 1
 
 
+logger = BasicLogger()
 print("Start training")
 start_time = time.time()
 best_loss = math.inf
 for epoch in range(start_epoch, epochs):
     train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm)
+    logger.update(train_stats, epoch, 'train')
     lr_scheduler.step()
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-        checkpoint_paths = [os.path.join(output_dir, 'checkpoint.pth')]
-        # extra checkpoint before LR drop and every 100 epochs
-        if (epoch + 1) % lr_drop == 0 or (epoch + 1) % 100 == 0:
-            checkpoint_paths.append(os.path.join(output_dir, f'checkpoint{epoch:04}.pth'))
-        for checkpoint_path in checkpoint_paths:
-            save_on_master({
-                'model': model_without_ddp.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'lr_scheduler': lr_scheduler.state_dict(),
-                'epoch': epoch,
-            }, checkpoint_path)
 
-    val_stats = evaluate(model, criterion, data_loader_val, device)
+    val_stats = evaluate(model, criterion, data_loader_val, device, epoch)
+    logger.update(val_stats, epoch, 'val')
     if output_dir:
+        if not os.path.isdir(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+        logger.saveLogs(output_dir)
         if val_stats["loss_total"] < best_loss:
             best_loss = val_stats["loss_total"]
             save_on_master({
@@ -321,6 +290,7 @@ for epoch in range(start_epoch, epochs):
                 'lr_scheduler': lr_scheduler.state_dict(),
                 'epoch': epoch,
             }, os.path.join(output_dir, "best.pth"))
+
 
 total_time = time.time() - start_time
 total_time_str = str(time.datetime.timedelta(seconds=int(total_time)))

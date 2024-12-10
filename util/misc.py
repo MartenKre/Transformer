@@ -157,32 +157,36 @@ def reduce_dict(input_dict, average=True):
 
 
 class BasicLogger():
-    def __init__(self, delimiter="\t"):
+    def __init__(self):
         self.entries = {}
-        self.delimiter = delimiter
+        self.header_set = False
 
-    def update(self, **kwargs):
-        for k, v in kwargs.items():
-            if isinstance(v, torch.Tensor):
-                v = v.item()
-            assert isinstance(v, (float, int))
-            self.entries[k] = v
-    
-    def __getattr__(self, attr):
-        if attr in self.entries:
-            return self.entries[attr]
-        if attr in self.__dict__:
-            return self.__dict__[attr]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
-            type(self).__name__, attr))
+    def update(self, loss_dict, epoch, mode):
+        """ Function to append loss dict to data logger
+            Args:   loss_dict (dict): train / val loss dict
+                    epoch (int):  current epoch
+                    mode (str):   'train' / 'val' / 'test'
+        """
+        assert mode in ['train', 'val', 'test']
+        if epoch not in self.entries:
+            self.entries[epoch] = {mode: {}}
+        self.entries[epoch][mode] = loss_dict
 
-    def __str__(self):
-        loss_str = []
-        for name, meter in self.entries.items():
-            loss_str.append(
-                "{}: {}".format(name, str(meter))
-            )
-        return self.delimiter.join(loss_str)
+    def saveLogs(self, path):
+        # Arg: path to training results folder
+        with open(os.path.join(path, 'log.txt'), 'a') as file:
+            for epoch in self.entries:
+                for mode in self.entries[epoch]:
+                    results = self.entries[epoch][mode]
+                    if not self.header_set:
+                        self.header_set = True
+                        header = "".ljust(20)+"".join([str(k).ljust(25) for k in results])
+                        file.write(header + "\n")
+                    line = f"Epoch {epoch} ({mode}):".ljust(20) + \
+                        "".join([str(f"{k}: {round(v,3)}".ljust(25)) for k,v in results.items()])
+                    file.write(line + "\n")
+
+        self.entries = {}
 
 
 class MetricLogger(object):
