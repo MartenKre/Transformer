@@ -21,7 +21,7 @@ def collate_fn(batch):
     
 
 class BuoyDataset(Dataset):
-    def __init__(self, yaml_file, mode='train', transform=True) -> None:
+    def __init__(self, yaml_file, mode='train', transform=False) -> None:
         # mode: train/test/val
         super().__init__()
 

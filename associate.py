@@ -83,11 +83,6 @@ print('Number of params:', n_parameters)
 if not os.path.exists(path_to_video) and os.path.exists(path_to_imu):
     raise ValueError(f"Given Paths to data not valid: {path_to_video}, {path_to_imu}")
     
-transform_img = transforms.Compose([
-    transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],  # Normalize using ImageNet stats
-                            std=[0.229, 0.224, 0.225])
-])
 
 buoyGTData = GetGeoData()
 imu_data = getIMUData(path_to_imu)
@@ -107,7 +102,7 @@ while cap.isOpened():
     if buoyGTData.checkForRefresh(*ship_pose[0:2]):
         buoys_on_tile = buoyGTData.getBuoyLocations(*ship_pose[0:2])
     buoys_filtered = filterBuoys(ship_pose, buoys_on_tile, fov_with_padding=110, dist_thresh=1000, nearby_thresh=30)
-    queries = torch.tensor(createQueryData(ship_pose, buoys_filtered))[...,1:3]
+    queries = torch.tensor(createQueryData(ship_pose, buoys_filtered))[...,0:2]
     if queries.ndim == 1:
         queries = queries.unsqueeze(0)
     # normalize query inputs (dist and angle)
@@ -115,13 +110,10 @@ while cap.isOpened():
     queries[..., 1] = queries[..., 1] / 180
 
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img_resized = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
-    img = transform_img(img)    # standardizes img data & converts to 3xHxW
+    img = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
+    img = torch.tensor(img).permute(2, 0, 1) / 255    # standardizes img data & converts to 3xHxW
 
     # add batch dims
     queries = queries.unsqueeze(0)
     img = img.unsqueeze(0)
-    print(queries.shape)
-    print(queries)
-    print(img_resized.shape)
 
