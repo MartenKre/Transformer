@@ -13,7 +13,7 @@ from models.detr import DETR, SetCriterion, PostProcess
 from models.transformer import Transformer
 from models.backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
-from util.misc import is_main_process, save_on_master, reduce_dict, BasicLogger
+from util.misc import is_main_process, save_on_master, reduce_dict, BasicLogger, computeStats
 
 
 def init_position_encoding(hidden_dim):
@@ -52,13 +52,12 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     model.train()
     criterion.train()
 
-    logger = BasicLogger(delimiter = "   ")
     loss_total = []
     loss_obj = []
     loss_boxL1 = []
     loss_giou = []
 
-    with tqdm(data_loader, desc=f"Train - Epoch" + str(epoch), ncols=180) as pbar:
+    with tqdm(data_loader, desc=f"Train - Epoch" + str(epoch), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
             queries = queries.to(device)
@@ -72,10 +71,10 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             weight_dict = criterion.weight_dict
 
             losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
-            loss_total.append(round(losses.item(),3))
-            loss_obj.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k).item(),3,))
-            loss_boxL1.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k).item(),3))
-            loss_giou.append(round(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k).item(),3))
+            loss_total.append(losses.item())
+            loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_bce' in k).item())
+            loss_boxL1.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_bbox' in k).item())
+            loss_giou.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_giou' in k).item())
             tqdm_str = {"Loss": f"{round(sum(loss_total)/len(loss_total) ,3)}",
                         "Loss Obj": f"{round(sum(loss_obj)/len(loss_obj), 3)}",
                         "Loss BoxL1": f"{round(sum(loss_boxL1)/len(loss_boxL1), 3)}",
@@ -90,16 +89,16 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             optimizer.zero_grad()
             losses.backward()
 
-            # print("Loss: ", losses)
-            # gradients = []
-            # for name, param in model.named_parameters():
-            #     if param.grad is not None:
-            #         gradients.append(param.grad.flatten())
-            # print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))))
-            # print("Max Norm: ", torch.norm(torch.cat(gradients)))
-            # for name, param in model.named_parameters():
-            #     if param.grad is not None:
-            #         print(f"Layer {name}: ", torch.max(torch.abs(param.grad)))
+            print("Loss: ", losses)
+            gradients = []
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    gradients.append(param.grad.flatten())
+            print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))).item())
+            print("Max Norm: ", torch.norm(torch.cat(gradients)).item())
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    print(f"Layer {name}: ", torch.max(torch.abs(param.grad)).item())
 
 
             for name, param in model.named_parameters():
@@ -113,7 +112,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             optimizer.step()
 
     return {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
-            "loss_boxL1": sum(loss_boxL1/len(loss_boxL1)), "loss_giou": sum(loss_giou)/len(loss_giou)}
+            "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
     
 
 @torch.no_grad()
@@ -125,7 +124,8 @@ def evaluate(model, criterion, data_loader, device):
     loss_obj = []
     loss_boxL1 = []
     loss_giou = []
-    with tqdm(data_loader, desc=f"Val", ncols=180) as pbar:
+    stats = {k: 0 for k in ["p","n","tp","fp","tn","fn"]}
+    with tqdm(data_loader, desc=f"Val", ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
             queries = queries.to(device)
@@ -140,18 +140,25 @@ def evaluate(model, criterion, data_loader, device):
 
             losses = losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
             loss_total.append(losses.item())
-            loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bce' in k).item())
-            loss_boxL1.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_bbox' in k).item())
-            loss_giou.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k =='loss_giou' in k).item())
+            loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_bce' in k).item())
+            loss_boxL1.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_bbox' in k).item())
+            loss_giou.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_giou' in k).item())
             tqdm_str = {"Loss": f"{round(sum(loss_total)/len(loss_total) ,3)}",
                         "Loss Obj": f"{round(sum(loss_obj)/len(loss_obj), 3)}",
                         "Loss BoxL1": f"{round(sum(loss_boxL1)/len(loss_boxL1), 3)}",
                         "Loss Giou": f"{round(sum(loss_giou)/len(loss_giou),3)}"}
             pbar.set_postfix(tqdm_str)
 
+            res = computeStats(outputs, labels, queries_mask, labels_mask)
+            stats = {k: stats[k]+res[k] for k in stats if k in res}
+
+    print("Results Objectness:", end="\t")
+    for k in stats:
+        print(f"{k}: {stats[k]}", end="\t\t")
+    print("\n")
 
     return {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
-            "loss_boxL1": sum(loss_boxL1/len(loss_boxL1)), "loss_giou": sum(loss_giou)/len(loss_giou)}
+            "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
 
 ###########
 # Settings
@@ -183,17 +190,20 @@ distributed = False
 
 # Loss
 aux_loss = True
+bce_loss_coef = 1
 bbox_loss_coef = 1
 giou_loss_coef = 0.5
 
 # Optimizer / DataLoader
 lr = 1e-4
-batch_size=1
-weight_decay=1e-4
+batch_size=2
+weight_decay=1e-3
 epochs=300
 lr_drop=200
-clip_max_norm=0.1
-num_workers = 2
+clip_max_norm=0.0
+num_workers = 4
+if distributed:
+    num_workers = int(torch.cuda.device_count() * 4)
 
 
 # Init Model
@@ -217,7 +227,7 @@ n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print('number of params:', n_parameters)
 
 # Init Loss
-weight_dict = {'loss_bce': 1, 'loss_bbox': bbox_loss_coef}
+weight_dict = {'loss_bce': bce_loss_coef, 'loss_bbox': bbox_loss_coef}
 weight_dict['loss_giou'] = giou_loss_coef
 if aux_loss:
     aux_weight_dict = {}
@@ -277,8 +287,6 @@ print("Start training")
 start_time = time.time()
 best_loss = math.inf
 for epoch in range(start_epoch, epochs):
-    if distributed:
-        sampler_train.set_epoch(epoch)
     train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm)
     lr_scheduler.step()
     if output_dir:

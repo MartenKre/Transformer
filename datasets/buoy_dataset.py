@@ -17,7 +17,6 @@ def collate_fn(batch):
     pad_mask_q = pad_sequence(queries_mask, batch_first=True, padding_value=False)
     pad_mask_l = pad_sequence(labels_mask, batch_first=True, padding_value=False)
 
-    
     return img, pad_q, pad_l, pad_mask_q, pad_mask_l, name
     
 
@@ -85,7 +84,7 @@ class BuoyDataset(Dataset):
 
         # normalize query inputs (dist and angle)
         queries[..., 1] = queries[..., 1] / 1000
-        queries[..., 2] = queries[..., 1] / torch.pi
+        queries[..., 2] = (queries[..., 2]/180 * torch.pi) / torch.pi   # convert to rad and normalize to pi
 
         labels_extended = torch.zeros(queries.size(dim=0), 5, dtype=torch.float32)
         labels_extended[labels[:, 0].int(), :] = labels[:, :]
