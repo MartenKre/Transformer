@@ -2,6 +2,7 @@
 """
 DETR model and criterion classes.
 """
+from json import encoder
 import torch
 import torch.nn.functional as F
 from torch import angle, nn
@@ -58,6 +59,7 @@ class DETR(nn.Module):
         features, pos = self.backbone(images)
 
         encoder_embed = self.input_proj(features)
+
         #decoder_embed = self.query_embed(queries)
         dist_input = (queries[...,0].clamp(min=0,max=1) * 1000) // 25
         angle_input = ((queries[...,1].clamp(min=-1, max=1)+1) * 500) // 12.5
@@ -112,11 +114,6 @@ class SetCriterion(nn.Module):
         targets = torch.zeros_like(src_logits) 
         targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
 
-        # print(src_logits)
-        # print(targets)
-        # print(labels_mask)
-        # print(queries_mask)
-        # print("------------------")
         loss_bce = F.binary_cross_entropy(src_logits, targets, reduction='none')
         loss_bce = loss_bce[queries_mask].sum() /  num_q     # compute mean loss (only for non padded elements)
         losses = {'loss_bce': loss_bce}

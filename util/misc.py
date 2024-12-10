@@ -495,3 +495,24 @@ def interpolate(input, size=None, scale_factor=None, mode="nearest", align_corne
         return _new_empty_tensor(input, output_shape)
     else:
         return torchvision.ops.misc.interpolate(input, size, scale_factor, mode, align_corners)
+
+
+def computeStats(outputs, labels, queries_mask, labels_mask):
+    # Computes TP / FP / TN / FN for given outputs
+    src_logits = outputs['pred_logits']
+ 
+    targets = torch.zeros_like(src_logits) 
+    targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
+
+    positives = targets.sum().item()
+    negatives = targets[queries_mask].numel() - targets.sum().item()
+
+    f = src_logits[labels_mask].flatten()
+    tp = f[f>0.5].numel()
+    fn = f.numel()-tp
+
+    f = src_logits[queries_mask & ~labels_mask].flatten()
+    fp = f[f>0.5].numel()
+    tn = f.numel()-fp
+
+    return {"p": positives, "n": negatives, "tp": tp, "fp": fp, "tn": tn, "fn": fn}
