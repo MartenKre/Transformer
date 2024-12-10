@@ -89,16 +89,16 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             optimizer.zero_grad()
             losses.backward()
 
-            print("Loss: ", losses)
-            gradients = []
-            for name, param in model.named_parameters():
-                if param.grad is not None:
-                    gradients.append(param.grad.flatten())
-            print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))).item())
-            print("Max Norm: ", torch.norm(torch.cat(gradients)).item())
-            for name, param in model.named_parameters():
-                if param.grad is not None:
-                    print(f"Layer {name}: ", torch.max(torch.abs(param.grad)).item())
+            # print("Loss: ", losses)
+            # gradients = []
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         gradients.append(param.grad.flatten())
+            # print("Max Grad: ", torch.max(torch.abs(torch.cat(gradients))).item())
+            # print("Max Norm: ", torch.norm(torch.cat(gradients)).item())
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         print(f"Layer {name}: ", torch.max(torch.abs(param.grad)).item())
 
 
             for name, param in model.named_parameters():
@@ -168,7 +168,7 @@ def evaluate(model, criterion, data_loader, device):
 transfer_learning = True    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
-path_to_weights = r"/home/marten/Uni/Semester_4/src/Transformer/detr-r50-e632da11.pth" 
+path_to_weights = r"detr-r50-e632da11.pth" 
 output_dir = "run1"
 
 # Backbone
@@ -188,15 +188,22 @@ input_dim_gt = 2    # Amount of datapoints of a query object before being transf
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 distributed = False
 
+# Dataset
+path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml"
+if distributed:
+    path_to_dataset = "/data/mkreis/dataset/dataset.yaml"
+
 # Loss
 aux_loss = True
 bce_loss_coef = 1
 bbox_loss_coef = 1
-giou_loss_coef = 0.5
+giou_loss_coef = 1
 
 # Optimizer / DataLoader
 lr = 1e-4
 batch_size=2
+if distributed:
+    batch_size = 2*torch.cuda.device_count()
 weight_decay=1e-3
 epochs=300
 lr_drop=200
@@ -221,6 +228,7 @@ model_without_ddp = model
 if distributed:
     print("Distributed Training!")
     print("Using ", torch.cuda.device_count(), " GPUs")
+    print("Batch Size:", batch_size)
     model = torch.nn.parallel.DataParallel(model)
     model_without_ddp = model.module
 n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -252,8 +260,8 @@ optimizer = torch.optim.AdamW(param_dicts, lr=lr, weight_decay=weight_decay)
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_drop)
 
 # Dataset
-dataset_train = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml", mode='train')
-dataset_val = BuoyDataset(yaml_file="/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml", mode='val')
+dataset_train = BuoyDataset(yaml_file=path_to_dataset, mode='train')
+dataset_val = BuoyDataset(yaml_file=path_to_dataset, mode='val')
 
 # if distributed:
 #     sampler_train = DistributedSampler(dataset_train, shuffle=True)
