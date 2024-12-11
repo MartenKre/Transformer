@@ -6,9 +6,11 @@ import os
 import cv2
 import random
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
+from torch._prims_common import dtype_to_type
 from torchvision import transforms
 
 from models.detr import DETR, PostProcess
@@ -51,13 +53,15 @@ def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, d
     )
 
 
-def draw_boxes(frame, boxes, confs):
-    colors = []
+def draw_boxes(frame, boxes, confs, colors):
+    i = 0
     for bb,conf in zip(boxes,confs):
-        color = [random.randint(0, 255) for _ in range(3)]
-        colors.append(color)
         txt = str(round(conf.item(), 3))
-        plot_one_box(bb, frame, color=color, label=txt)
+        clr = colors[i][1]
+        clr = [x*255 for x in clr]
+        clr = [clr[2], clr[1], clr[0], clr[3]]
+        plot_one_box(bb, frame, color=clr, label=txt)
+        i += 1
     return colors
 
 
@@ -68,7 +72,7 @@ def init_plot():
     return plt, ax
 
 
-def live_plotting(plt, ax, queries):
+def live_plotting(plt, ax, queries, colors):
     # transfoms buoy data to ship cs and plots them
 
     buoys = []
@@ -98,8 +102,11 @@ def live_plotting(plt, ax, queries):
 
     if len(buoys) > 0:
         buoys = np.asarray(buoys)
-        ax.plot3D(buoys[:,0], buoys[:,1], np.zeros(len(buoys)), 'o', color = 'red')
-        for pred in buoys:
+        ax.plot3D(buoys[:,0], buoys[:,1], np.zeros(len(buoys)), 'o', color = 'green')
+        for i, pred in enumerate(buoys):
+            if i in [e[0] for e in colors]:
+                clr = [x[1] for x in colors if x[0] == i][0]
+                ax.plot3D(pred[0], pred[1], np.zeros(len(buoys)), 'o', color=clr)
             ax.plot([0, pred[0]], [0,pred[1]],zs=[0,0], color='grey', linestyle='dashed')
     # Optional: Labels for clarity
     ax.set_xlabel('X')
@@ -109,10 +116,24 @@ def live_plotting(plt, ax, queries):
 
     plt.draw()
 
-
+def get_colors(pred_obj, conf_thresh):
+    color_table = [(255/255, 255/255, 0, 1),
+                (102/255, 0, 102/255, 1),
+                (0, 255/255, 255/255, 1),
+                (255/255, 153/255, 255/255, 1),
+                (153/255, 102/255, 51/255, 1),
+                (255/255,153/155, 0, 1),
+                (224/255, 224/255, 224/255, 1),
+                (128/255, 128/255, 0, 1)]
+    color_arr = []
+    for i,q in enumerate(pred_obj):
+        if q > conf_thresh:
+            color = color_table[i%len(color_table)]
+            color_arr.append([i, color])
+    return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "/home/marten/Uni/Semester_4/src/Transformer/run1/best_overall.pth"
+path_to_weights = "/home/marten/Uni/Semester_4/src/Transformer/run_MLP1/best.pth"
 path_to_video = "/home/marten/Uni/Semester_4/src/TestData/954_2.avi"
 path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_954.txt"
 # path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
@@ -131,7 +152,7 @@ dropout = 0.1
 nheads = 8          # transformear heads
 pre_norm = True     # apply norm pre or post tranformer layer
 input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
-use_embeddings = True
+use_embeddings = False
 
 # Init Model
 backbone = init_backbone(1e-5, hidden_dim)
@@ -177,7 +198,7 @@ while cap.isOpened():
     if buoyGTData.checkForRefresh(*ship_pose[0:2]):
         buoys_on_tile = buoyGTData.getBuoyLocations(*ship_pose[0:2])
     buoys_filtered = filterBuoys(ship_pose, buoys_on_tile, fov_with_padding=110, dist_thresh=1000, nearby_thresh=30)
-    queries = torch.tensor(createQueryData(ship_pose, buoys_filtered))[...,0:2]
+    queries = torch.tensor(createQueryData(ship_pose, buoys_filtered), dtype=torch.float32)[...,0:2]
 
 
     if queries.numel() > 0: # if no queries could be generated -> skip inference
@@ -189,7 +210,7 @@ while cap.isOpened():
 
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
-        img = torch.tensor(img).permute(2, 0, 1) / 255    # standardizes img data & converts to 3xHxW
+        img = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1) / 255    # standardizes img data & converts to 3xHxW
 
         # add batch dims
         queries = queries.unsqueeze(0).to(device)
@@ -201,17 +222,16 @@ while cap.isOpened():
         outputs = postprocess(outputs, target_size=[frame.shape[0], frame.shape[1]])  # convert boxes from cxcyhw -> xyxy w.r.t. original image size
         pred_obj = outputs['objectness'].cpu().detach()
         pred_boxes = outputs['boxes'][pred_obj>=conf_thresh].cpu().detach()    # filter boxes based on objectness thresh
-
-        colors = draw_boxes(frame, pred_boxes, pred_obj[pred_obj>=conf_thresh])     # draw bbs with conf as text
+        colors = get_colors(pred_obj, conf_thresh)
+        draw_boxes(frame, pred_boxes, pred_obj[pred_obj>=conf_thresh], colors)     # draw bbs with conf as text
 
     cv2.imshow("Buoy Association Transformer", frame)
-    live_plotting(plt, ax, queries)
+    if frame_id % 8 == 0:
+        live_plotting(plt, ax, queries, colors)
     frame_id += 1
 
     key = cv2.waitKey(1)
     # Press 'q' to exit the loop
     if key == ord('q'):
         break
-
-    #TODO: add rendering / plotting of associated gt buoys on chart
 
