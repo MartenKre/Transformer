@@ -152,7 +152,7 @@ transfer_learning = True    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
 path_to_weights = r"detr-r50-e632da11.pth" 
-output_dir = "test"
+output_dir = "run_Emb1"
 
 # Backbone
 lr_backbone = 1e-5
@@ -166,6 +166,7 @@ dropout = 0.1
 nheads = 8          # transformear heads
 pre_norm = True     # apply norm pre or post tranformer layer
 input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
+use_embeddings = True
 
 # Multi GPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -179,12 +180,12 @@ if distributed:
 # Loss
 aux_loss = True
 bce_loss_coef = 1
-bbox_loss_coef = 1
-giou_loss_coef = 1
+bbox_loss_coef = 2
+giou_loss_coef = 5
 
 # Optimizer / DataLoader
 lr = 1e-4
-batch_size=8
+batch_size=2
 if distributed:
     batch_size = 2*torch.cuda.device_count()
 weight_decay=1e-3
@@ -193,7 +194,7 @@ lr_drop=200
 clip_max_norm=0.0
 num_workers = 4
 if distributed:
-    num_workers = int(torch.cuda.device_count() * 4)
+    num_workers = int(torch.cuda.device_count() * 10)
 
 
 # Init Model
@@ -204,6 +205,7 @@ model = DETR(
     transformer,
     input_dim_gt=2,
     aux_loss=aux_loss,
+    use_embeddings=use_embeddings,
 )
 model.to(device)
 
@@ -227,9 +229,6 @@ if aux_loss:
     weight_dict.update(aux_weight_dict)
 losses = ['labels', 'boxes']
 criterion = SetCriterion(weight_dict, losses)
-
-# Init PostProcessor (only for evaluation)
-postprocessors = {'bbox': PostProcess()}
 
 # Init Optim
 param_dicts = [

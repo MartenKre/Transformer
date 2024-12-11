@@ -21,7 +21,7 @@ from .transformer import build_transformer
 
 class DETR(nn.Module):
     """ This is the DETR module that performs object detection """
-    def __init__(self, backbone, transformer, input_dim_gt, aux_loss=False):
+    def __init__(self, backbone, transformer, input_dim_gt, aux_loss=False, use_embeddings=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -33,12 +33,15 @@ class DETR(nn.Module):
         hidden_dim = transformer.d_model
         self.class_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
-        #self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
-        self.query_embed_1 = nn.Embedding(40, int(hidden_dim/input_dim_gt))
-        self.query_embed_2 = nn.Embedding(80, int(hidden_dim/input_dim_gt))
+        if not use_embeddings:
+            self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
+        else:
+            self.query_embed_1 = nn.Embedding(40, int(hidden_dim/input_dim_gt))
+            self.query_embed_2 = nn.Embedding(80, int(hidden_dim/input_dim_gt))
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
+        self.use_embeddings = use_embeddings
 
     def forward(self, images, queries, queries_mask):
         """ The forward expects a NestedTensor, which consists of:
@@ -60,10 +63,12 @@ class DETR(nn.Module):
 
         encoder_embed = self.input_proj(features)
 
-        #decoder_embed = self.query_embed(queries)
-        dist_input = (queries[...,0].clamp(min=0,max=1) * 1000) // 25
-        angle_input = ((queries[...,1].clamp(min=-1, max=1)+1) * 500) // 12.5
-        decoder_embed = torch.cat((self.query_embed_1(dist_input.int()), self.query_embed_2(angle_input.int())), dim = -1) # [N, Seq_len, 256] query embedding 
+        if self.use_embeddings:
+            dist_input = (queries[...,0].clamp(min=0,max=1) * 1000) // 25
+            angle_input = ((queries[...,1].clamp(min=-1, max=1)+1) * 500) // 12.5
+            decoder_embed = torch.cat((self.query_embed_1(dist_input.int()), self.query_embed_2(angle_input.int())), dim = -1) # [N, Seq_len, 256] query embedding 
+        else:
+            decoder_embed = self.query_embed(queries)
 
         hs = self.transformer(encoder_embed, decoder_embed, pos, queries_mask)[0] # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
 
