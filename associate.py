@@ -5,6 +5,9 @@ import torch
 import os
 import cv2
 import random
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from torchvision import transforms
 
@@ -12,8 +15,9 @@ from models.detr import DETR, PostProcess
 from models.transformer import Transformer
 from models.backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
-from util.association_utility import getIMUData, filterBuoys, createQueryData, GetGeoData
+from util.association_utility import getIMUData, filterBuoys, createQueryData, GetGeoData, LatLng2ECEF, T_ECEF_Ship
 from util.plot_utils import plot_one_box
+
 
 def init_position_encoding(hidden_dim):
     N_steps = hidden_dim // 2
@@ -46,6 +50,7 @@ def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, d
         return_intermediate_dec=True,
     )
 
+
 def draw_boxes(frame, boxes, confs):
     colors = []
     for bb,conf in zip(boxes,confs):
@@ -54,6 +59,55 @@ def draw_boxes(frame, boxes, confs):
         txt = str(round(conf.item(), 3))
         plot_one_box(bb, frame, color=color, label=txt)
     return colors
+
+
+def init_plot():
+    plt.ion()
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+    return plt, ax
+
+
+def live_plotting(plt, ax, queries):
+    # transfoms buoy data to ship cs and plots them
+
+    buoys = []
+    queries = queries.cpu().detach().squeeze(0)
+    for dist, angle in queries:
+        # renormalize dist & angle
+        dist = dist * 1000
+        angle = np.deg2rad(angle * 180)
+        p_x = dist * np.cos(angle)
+        p_y = dist * np.sin(angle)
+        buoys.append([p_x, p_y])
+
+    ax.cla()
+
+    # Define ship shape (arrow) in the XY plane
+    scaling = 30
+    coords = np.asarray([[1, 0, 0], [-2, 1, 0], [-1, 0, 0], [-2, -1, 0], [1, 0, 0]])
+    coords *= scaling
+    poly = Poly3DCollection([coords], color=[(0,0,0.9)], edgecolor='k')
+    ax.add_collection3d(poly)
+
+    # Customize the view
+    ax.set_xlim(-100, 700)
+    ax.set_ylim(-400, 400)
+    ax.set_zlim(0, 1)
+    #ax.set_zlim(-1, 1)  # Keep it flat in the Z-axis for an XY view
+
+    if len(buoys) > 0:
+        buoys = np.asarray(buoys)
+        ax.plot3D(buoys[:,0], buoys[:,1], np.zeros(len(buoys)), 'o', color = 'red')
+        for pred in buoys:
+            ax.plot([0, pred[0]], [0,pred[1]],zs=[0,0], color='grey', linestyle='dashed')
+    # Optional: Labels for clarity
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.view_init(elev=60, azim=-180)  # Set view to make it look like a 2D XY plane
+
+    plt.draw()
 
 
 
@@ -77,6 +131,7 @@ dropout = 0.1
 nheads = 8          # transformear heads
 pre_norm = True     # apply norm pre or post tranformer layer
 input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
+use_embeddings = True
 
 # Init Model
 backbone = init_backbone(1e-5, hidden_dim)
@@ -86,6 +141,7 @@ model = DETR(
     transformer,
     input_dim_gt=2,
     aux_loss=False,
+    use_embeddings=use_embeddings,
 )
 model.to(device)
 model.eval()
@@ -106,6 +162,7 @@ buoyGTData = GetGeoData()
 imu_data = getIMUData(path_to_imu)
 ship_pose = [imu_data[0][3],imu_data[0][4],imu_data[0][2]]
 buoys_on_tile = buoyGTData.getBuoyLocations(ship_pose[0], ship_pose[1]) 
+plt, ax = init_plot()
 
 cap = cv2.VideoCapture(path_to_video)
 frame_id = 0
@@ -148,10 +205,13 @@ while cap.isOpened():
         colors = draw_boxes(frame, pred_boxes, pred_obj[pred_obj>=conf_thresh])     # draw bbs with conf as text
 
     cv2.imshow("Buoy Association Transformer", frame)
+    live_plotting(plt, ax, queries)
     frame_id += 1
 
     key = cv2.waitKey(1)
     # Press 'q' to exit the loop
     if key == ord('q'):
         break
+
+    #TODO: add rendering / plotting of associated gt buoys on chart
 

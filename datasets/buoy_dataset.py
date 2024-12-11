@@ -74,7 +74,7 @@ class BuoyDataset(Dataset):
 
         labels = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'labels', self.labels[index])), dtype=torch.float32)
         queries = torch.tensor(np.loadtxt(os.path.join(self.data_path, 'queries', self.queries[index])),
-                               dtype=torch.float32)[..., 0:3] # only take the first two datapoints in the label file
+                               dtype=torch.float32)[..., 0:3] # only take the first three datapoints in the label file (id, dist, angle)
 
         # ensure 2D shape:
         if queries.ndim == 1:
