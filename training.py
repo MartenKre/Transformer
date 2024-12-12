@@ -292,5 +292,7 @@ for epoch in range(start_epoch, epochs):
 
 
 total_time = time.time() - start_time
-total_time_str = str(time.datetime.timedelta(seconds=int(total_time)))
-print('Training time {}'.format(total_time_str))
+hours = int(total_time // 3600)
+minutes = int((total_time - hours*3600) // 60)
+seconds = int((total_time - hours*3600 - 60*minutes))
+print(f'Training time {hours:02}:{minutes:02}:{seconds:02}')
