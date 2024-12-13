@@ -139,7 +139,7 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
     if logger is not None:
         results = {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
                 "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
-        logger.updateLosses(losses, epoch, 'val')
+        logger.updateLosses(results, epoch, 'val')
         logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
         map50 = logger.print_mAP50(mode='val')
         results['mAP50'] = map50
@@ -274,7 +274,7 @@ if transfer_learning:
 logger = BasicLogger()
 print("Start training")
 start_time = time.time()
-best_map = 0
+best_map = -1
 for epoch in range(start_epoch, epochs):
     logger.resetStats() # clear logger for new epoch
 
@@ -291,7 +291,7 @@ for epoch in range(start_epoch, epochs):
         logger.saveLossLogs(output_dir)
         logger.saveStatsLogs(output_dir, epoch)
         logger.plotLoss(output_dir)
-        if val_results["mAP50"] < best_map:
+        if val_results["mAP50"] > best_map:
             print("Saved new model as best.pht")
             logger.plotPRCurve(path=output_dir, mode='val')
             best_map = val_results["mAP50"]

@@ -228,8 +228,8 @@ class BasicLogger():
         targets = torch.zeros_like(src_logits) 
         targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
 
-        p = targets.sum().item()
-        n = targets[queries_mask].numel() - targets.sum().item()
+        p = int(targets.sum().item())
+        n = int(targets[queries_mask].numel() - targets.sum().item())
 
         f = src_logits[labels_mask].flatten()
         tp = f[f>thresh].numel()
@@ -260,7 +260,7 @@ class BasicLogger():
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0
             result.append(precision)
         result = round(sum(result)/len(result), 4)
-        print("mAP@50: ", round(sum(result)/len(result), 4))
+        print("mAP@50: ", result)
         self.stats_output['mAP@50'] = result
         return result 
 
@@ -293,7 +293,7 @@ class BasicLogger():
         with open(os.path.join(path, 'log_stats.txt'), 'a') as file:
             start = f"Epoch {epoch}:".ljust(12)
             content = "".join([str(f"{k}: {v}".ljust(20)) for k,v in self.stats_output.items() if not isinstance(v,dict)])
-            content_dict = "".join([str(f"{k}: {v}".ljust(20)) for k, v in {v for v in self.stats_output.values() if isinstance(v, dict)}.items()])
+            content_dict = "".join([str(f"{k}: {v}".ljust(20)) for d in [v for v in self.stats_output.values() if isinstance(v, dict)] for k, v in d.items()])
             file.write(start + content + content_dict + "\n")
 
     def plotPRCurve(self, path, mode='val'):
