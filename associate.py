@@ -133,13 +133,13 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "/home/marten/Uni/Semester_4/src/Transformer/run_MLP1/best.pth"
-path_to_video = "/home/marten/Uni/Semester_4/src/TestData/955_2.avi"
-path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
+path_to_weights = "/home/marten/Uni/Semester_4/src/Transformer/run_MLP2/best.pth"
+path_to_video = "/home/marten/Uni/Semester_4/src/TestData/954_2.avi"
+path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_954.txt"
 #path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
 #path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
-#path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/19_2.avi"
-#path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_19.txt"
+path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/19_2.avi"
+path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_19.txt"
 
 # General settings
 conf_thresh = 0.5    # threshhold of objectness pred -> only queries with pred_conf >= conf_thresh will be visualized

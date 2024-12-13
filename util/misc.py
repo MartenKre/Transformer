@@ -10,6 +10,8 @@ import time
 from collections import defaultdict, deque
 import datetime
 import pickle
+import numpy as np
+import matplotlib.pyplot as plt
 from packaging import version
 from typing import Optional, List
 
@@ -158,10 +160,11 @@ def reduce_dict(input_dict, average=True):
 
 class BasicLogger():
     def __init__(self):
-        self.entries = {}
+        self.entries = {}   # dict containing loss logs
+        self.stats_dict = {}
         self.header_set = False
 
-    def update(self, loss_dict, epoch, mode):
+    def updateLosses(self, loss_dict, epoch, mode):
         """ Function to append loss dict to data logger
             Args:   loss_dict (dict): train / val loss dict
                     epoch (int):  current epoch
@@ -171,6 +174,59 @@ class BasicLogger():
         if epoch not in self.entries:
             self.entries[epoch] = {mode: {}}
         self.entries[epoch][mode] = loss_dict
+
+    def computePRData(self, outputs, queries_mask, labels_mask, mode):
+        # Computes PR Curve for given data
+        if 'PR' not in self.stats_dict[mode]:
+            self.stats_dict[mode]['PR'] = {}
+        thresh = np.linspace(0, 1, num=80)
+        for t in thresh:
+            t = round(t, 3)
+            res = self.computeCFMetrics(outputs, queries_mask, labels_mask, thresh=t)
+            if t not in self.stats_dict[mode]['PR']:
+                self.stats_dict[mode]['PR'][t] = res
+            else:
+                self.stats_dict[mode]['PR'][t] = {k: res[k]+self.stats_dict[mode]['PR'][t][k] for k in res}
+
+    def computeAP(self):
+        pass
+
+    def printCF(self, thresh=0.5, mode='val'):
+        t_idx = np.argmin(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
+        t = [t for t in self.stats_dict[mode]['PR']][t_idx]
+        data = self.stats_dict[mode]['PR'][t]
+        print("CF Objectness:", end="\t")
+        for k in data:
+            print(f"{k}: {data[k]}", end="\t\t")
+        print("\n")
+
+    def computeCFMetrics(self, outputs, queries_mask, labels_mask, thresh = 0.5):
+        # Computes TP / FP / TN / FN for given threshold
+        src_logits = outputs['pred_logits'].cpu().detach()
+        targets = torch.zeros_like(src_logits) 
+        targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
+
+        p = targets.sum().item()
+        n = targets[queries_mask].numel() - targets.sum().item()
+
+        f = src_logits[labels_mask].flatten()
+        tp = f[f>thresh].numel()
+        fn = f.numel()-tp
+
+        f = src_logits[queries_mask & ~labels_mask].flatten()
+        fp = f[f>thresh].numel()
+        tn = f.numel()-fp
+
+        return {"p": p, "n": n, "tp": tp, "fp": fp, "tn": tn, "fn": fn}
+
+    def computeStats(self, outputs, labels, queries_mask, labels_mask, mode='val'):
+        assert mode in ['train', 'val', 'test']
+        if mode not in self.stats_dict:
+            self.stats_dict[mode] = {}
+        self.computePRData(outputs, queries_mask, labels_mask, mode=mode)
+
+    def resetStats(self):
+        self.stats_dict = {}
 
     def saveLogs(self, path):
         # Arg: path to training results folder
@@ -185,8 +241,41 @@ class BasicLogger():
                     line = f"Epoch {epoch} ({mode}):".ljust(20) + \
                         "".join([str(f"{k}: {round(v,3)}".ljust(25)) for k,v in results.items()])
                     file.write(line + "\n")
-
         self.entries = {}
+
+    def plotPRCurve(self, path, mode='val'):
+        pr_pairs = []
+        for t in self.stats_dict[mode]['PR']:
+            tp = self.stats_dict[mode]['PR'][t]['tp']
+            fp = self.stats_dict[mode]['PR'][t]['fp']
+            fn = self.stats_dict[mode]['PR'][t]['fn']
+            precision = tp / (tp+fp) if (tp+fp) > 0 else 1
+            recall = tp / (tp+fn) if (tp+fn) > 0 else 1
+            pr_pairs.append([recall, precision, t])
+        x,y,z = zip(*pr_pairs[::-1])
+
+        z = np.array(z)
+        norm = plt.Normalize(vmin=z.min(), vmax=z.max())
+        cmap = plt.cm.viridis
+        colors = cmap(norm(z))
+
+        fig, ax = plt.subplots()
+        for i in range(len(x)-1):
+            ax.plot(x[i:i+2], y[i:i+2], color=colors[i])
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array(z)
+        cbar = plt.colorbar(sm, ax=ax)
+        cbar.set_label("Threshold")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.savefig(os.path.join(path, 'PR_Curve.pdf'))
+
+    def plotLoss(self, path):
+        pass
+        
 
 
 class MetricLogger(object):
@@ -501,22 +590,3 @@ def interpolate(input, size=None, scale_factor=None, mode="nearest", align_corne
         return torchvision.ops.misc.interpolate(input, size, scale_factor, mode, align_corners)
 
 
-def computeStats(outputs, labels, queries_mask, labels_mask):
-    # Computes TP / FP / TN / FN for given outputs
-    src_logits = outputs['pred_logits']
- 
-    targets = torch.zeros_like(src_logits) 
-    targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
-
-    positives = targets.sum().item()
-    negatives = targets[queries_mask].numel() - targets.sum().item()
-
-    f = src_logits[labels_mask].flatten()
-    tp = f[f>0.5].numel()
-    fn = f.numel()-tp
-
-    f = src_logits[queries_mask & ~labels_mask].flatten()
-    fp = f[f>0.5].numel()
-    tn = f.numel()-fp
-
-    return {"p": positives, "n": negatives, "tp": tp, "fp": fp, "tn": tn, "fn": fn}

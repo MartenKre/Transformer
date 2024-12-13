@@ -5,15 +5,13 @@ import math
 import sys
 from tqdm import tqdm
 
-from torch._prims_common import check_pin_memory
-
 from datasets.buoy_dataset import BuoyDataset, collate_fn
-from torch.utils.data import DataLoader, DistributedSampler, dataloader
-from models.detr import DETR, SetCriterion, PostProcess
+from torch.utils.data import DataLoader
+from models.detr import DETR, SetCriterion
 from models.transformer import Transformer
 from models.backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
-from util.misc import is_main_process, save_on_master, reduce_dict, BasicLogger, computeStats
+from util.misc import save_on_master, BasicLogger
 
 
 def init_position_encoding(hidden_dim):
@@ -48,7 +46,7 @@ def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, d
     )
 
 
-def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm = 0.1):
+def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm=0.1, logger=None):
     model.train()
     criterion.train()
 
@@ -94,12 +92,17 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
 
             optimizer.step()
 
-    return {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
-            "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
-    
+    if logger is not None:
+        losses ={"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
+                "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
+        logger.updateLosses(losses, epoch, 'train')
+        return losses
+    else:
+        return None
+
 
 @torch.no_grad()
-def evaluate(model, criterion, data_loader, device, epoch=""):
+def evaluate(model, criterion, data_loader, device, epoch, logger=None):
     model.eval()
     criterion.eval()
 
@@ -107,7 +110,6 @@ def evaluate(model, criterion, data_loader, device, epoch=""):
     loss_obj = []
     loss_boxL1 = []
     loss_giou = []
-    stats = {k: 0 for k in ["p","n","tp","fp","tn","fn"]}
     with tqdm(data_loader, desc=str(f"Val - Epoch {epoch}").ljust(15), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
@@ -131,17 +133,20 @@ def evaluate(model, criterion, data_loader, device, epoch=""):
                         "Loss BoxL1": f"{round(sum(loss_boxL1)/len(loss_boxL1), 3)}",
                         "Loss Giou": f"{round(sum(loss_giou)/len(loss_giou),3)}"}
             pbar.set_postfix(tqdm_str)
+            if logger is not None:
+                logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
 
-            res = computeStats(outputs, labels, queries_mask, labels_mask)
-            stats = {k: stats[k]+res[k] for k in stats if k in res}
+    if logger is not None:
+        losses ={"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
+                "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
+        logger.updateLosses(losses, epoch, 'val')
+        logger.printCF(thresh = 0.5, mode='val') # Print Confusion Matrix for threshold of 0.5
+        print("state_dict")
+        print(logger.stats_dict)
+        return losses
+    else:
+        return None
 
-    print("Results Objectness:", end="\t")
-    for k in stats:
-        print(f"{k}: {stats[k]}", end="\t\t")
-    print("\n")
-
-    return {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
-            "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
 
 ###########
 # Settings
@@ -152,7 +157,7 @@ transfer_learning = True    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
 path_to_weights = r"detr-r50-e632da11.pth" 
-output_dir = "run_Emb1"
+output_dir = "test"
 
 # Backbone
 lr_backbone = 1e-5
@@ -166,7 +171,7 @@ dropout = 0.1
 nheads = 8          # transformear heads
 pre_norm = True     # apply norm pre or post tranformer layer
 input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
-use_embeddings = True
+use_embeddings = False
 
 # Multi GPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -185,11 +190,11 @@ giou_loss_coef = 5
 
 # Optimizer / DataLoader
 lr = 1e-4
-batch_size=2
+batch_size=8
 if distributed:
     batch_size = 2*torch.cuda.device_count()
 weight_decay=1e-3
-epochs=300
+epochs=80
 lr_drop=200
 clip_max_norm=0.0
 num_workers = 4
@@ -271,18 +276,24 @@ print("Start training")
 start_time = time.time()
 best_loss = math.inf
 for epoch in range(start_epoch, epochs):
-    train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm)
-    logger.update(train_stats, epoch, 'train')
+    logger.resetStats() # clear logger for new epoch
+
+    # training
+    train_results = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm, logger)
     lr_scheduler.step()
 
-    val_stats = evaluate(model, criterion, data_loader_val, device, epoch)
-    logger.update(val_stats, epoch, 'val')
+    # validation
+    val_results = evaluate(model, criterion, data_loader_val, device, epoch, logger)
+
     if output_dir:
         if not os.path.isdir(output_dir):
             os.makedirs(output_dir, exist_ok=True)
         logger.saveLogs(output_dir)
-        if val_stats["loss_total"] < best_loss:
-            best_loss = val_stats["loss_total"]
+        if val_results["loss_total"] < best_loss:
+            print("Saved new model as best.pht")
+            print("\n")
+            logger.plotPRCurve(path=output_dir, mode='val')
+            best_loss = val_results["loss_total"]
             save_on_master({
                 'model': model_without_ddp.state_dict(),
                 'optimizer': optimizer.state_dict(),
