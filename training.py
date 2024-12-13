@@ -190,7 +190,7 @@ giou_loss_coef = 5
 
 # Optimizer / DataLoader
 lr = 1e-4
-batch_size=8
+batch_size=4
 if distributed:
     batch_size = 2*torch.cuda.device_count()
 weight_decay=1e-3
@@ -199,7 +199,7 @@ lr_drop=200
 clip_max_norm=0.0
 num_workers = 4
 if distributed:
-    num_workers = int(torch.cuda.device_count() * 10)
+    num_workers = 60
 
 
 # Init Model
@@ -247,7 +247,7 @@ optimizer = torch.optim.AdamW(param_dicts, lr=lr, weight_decay=weight_decay)
 lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_drop)
 
 # Dataset
-dataset_train = BuoyDataset(yaml_file=path_to_dataset, mode='train')
+dataset_train = BuoyDataset(yaml_file=path_to_dataset, mode='train', augment=True)
 dataset_val = BuoyDataset(yaml_file=path_to_dataset, mode='val')
 
 sampler_train = torch.utils.data.RandomSampler(dataset_train)

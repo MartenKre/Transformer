@@ -7,6 +7,7 @@ import yaml
 import os
 import numpy as np
 import cv2
+import random
 
 from util.box_ops import box_cxcywh_to_xyxy, box_iou
 
@@ -23,7 +24,7 @@ def collate_fn(batch):
     
 
 class BuoyDataset(Dataset):
-    def __init__(self, yaml_file, mode='train', transform=False) -> None:
+    def __init__(self, yaml_file, mode='train', transform=False, augment=False) -> None:
         # mode: train/test/val
         super().__init__()
 
@@ -42,6 +43,9 @@ class BuoyDataset(Dataset):
         self.transform = None
         if transform:
             self.transform = tf
+        self.augment = augment
+        self.augment_thresh = 0.5
+        random.seed(0)
         self.processYAML()
 
         self.labels = sorted(os.listdir(os.path.join(self.data_path, "labels")))
@@ -70,6 +74,13 @@ class BuoyDataset(Dataset):
     def __len__(self):
         return len(self.labels)
 
+    def flip_img(self, img, labels, queries):
+        # flips image horizontally 
+        img = cv2.flip(img, 1)
+        labels[:,1] = 1 - labels[:,1]
+        queries[:,-1] *= -1
+        return img, labels, queries
+
     def __getitem__(self, index):
         img = cv2.imread(os.path.join(self.data_path, "images", self.images[index]))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -83,6 +94,9 @@ class BuoyDataset(Dataset):
             queries = queries.unsqueeze(0)
         if labels.ndim == 1:
             labels = labels.unsqueeze(0)
+
+        if self.augment and random.random() > self.augment_thresh:
+            img, labels, queries = self.flip_img(img, labels, queries)
 
         # normalize query inputs (dist and angle)
         queries[..., 1] = queries[..., 1] / 1000 # normalize dist between 0-1 (gets clamped later to max 1)
