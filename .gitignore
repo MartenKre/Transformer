@@ -10,8 +10,10 @@
 datasets/data/
 experiment-*
 *.tmp
-*PR_Curve.pdf
+*.pdf
 *.pkl
+*log_loss.txt
+*log_stats.txt
 *log.txt
 **/.mypy_cache/*
 .mypy_cache/*
