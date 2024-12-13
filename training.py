@@ -55,7 +55,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     loss_boxL1 = []
     loss_giou = []
 
-    with tqdm(data_loader, desc=str(f"Train - Epoch {epoch}").ljust(15), ncols=150) as pbar:
+    with tqdm(data_loader, desc=str(f"Train - Epoch {epoch}").ljust(16), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
             queries = queries.to(device)
@@ -110,7 +110,7 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
     loss_obj = []
     loss_boxL1 = []
     loss_giou = []
-    with tqdm(data_loader, desc=str(f"Val - Epoch {epoch}").ljust(15), ncols=150) as pbar:
+    with tqdm(data_loader, desc=str(f"Val - Epoch {epoch}").ljust(16), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
             queries = queries.to(device)
@@ -141,8 +141,6 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
                 "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
         logger.updateLosses(losses, epoch, 'val')
         logger.printCF(thresh = 0.5, mode='val') # Print Confusion Matrix for threshold of 0.5
-        print("state_dict")
-        print(logger.stats_dict)
         return losses
     else:
         return None
@@ -289,9 +287,9 @@ for epoch in range(start_epoch, epochs):
         if not os.path.isdir(output_dir):
             os.makedirs(output_dir, exist_ok=True)
         logger.saveLogs(output_dir)
+        logger.plotLoss(output_dir)
         if val_results["loss_total"] < best_loss:
             print("Saved new model as best.pht")
-            print("\n")
             logger.plotPRCurve(path=output_dir, mode='val')
             best_loss = val_results["loss_total"]
             save_on_master({

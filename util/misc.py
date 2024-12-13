@@ -230,7 +230,7 @@ class BasicLogger():
 
     def saveLogs(self, path):
         # Arg: path to training results folder
-        with open(os.path.join(path, 'log.txt'), 'a') as file:
+        with open(os.path.join(path, 'log.txt'), 'w') as file:
             for epoch in self.entries:
                 for mode in self.entries[epoch]:
                     results = self.entries[epoch][mode]
@@ -241,7 +241,6 @@ class BasicLogger():
                     line = f"Epoch {epoch} ({mode}):".ljust(20) + \
                         "".join([str(f"{k}: {round(v,3)}".ljust(25)) for k,v in results.items()])
                     file.write(line + "\n")
-        self.entries = {}
 
     def plotPRCurve(self, path, mode='val'):
         pr_pairs = []
@@ -274,8 +273,18 @@ class BasicLogger():
         plt.savefig(os.path.join(path, 'PR_Curve.pdf'))
 
     def plotLoss(self, path):
-        pass
-        
+        epochs = [k for k in self.entries]
+        loss_train = [self.entries[k]['train']['loss_total'] for k in self.entries]
+        loss_val = [self.entries[k]['val']['loss_total'] for k in self.entries]
+
+        fig, ax = plt.subplots()
+        ax.plot(epochs, loss_train, color='tab:blue', label='train')
+        ax.plot(epochs, loss_val, color='tab:orange', label='val')
+        ax.legend()
+        ax.set_ylabel("Loss")
+        ax.set_xlabel("Epochs")
+
+        plt.savefig(os.path.join(path, 'Loss.pdf'))
 
 
 class MetricLogger(object):
