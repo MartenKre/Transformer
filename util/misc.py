@@ -164,6 +164,7 @@ class BasicLogger():
     def __init__(self):
         self.entries = {}   # dict containing loss logs
         self.stats_dict = {}
+        self.stats_output = {}
         self.header_set = False
 
     def updateLosses(self, loss_dict, epoch, mode):
@@ -190,25 +191,25 @@ class BasicLogger():
             else:
                 self.stats_dict[mode]['PR'][t] = {k: res[k]+self.stats_dict[mode]['PR'][t][k] for k in res}
 
-    def compute_mAPData(self, iou_thresh, outputs, labels, queries_mask, labels_mask, mode='val'):
+    def compute_mAPData(self, outputs, labels, queries_mask, labels_mask, iou_thresh=0.5, mode='val'):
         if 'mAP' not in self.stats_dict[mode]:
             self.stats_dict[mode]['mAP'] = {}
         if iou_thresh not in self.stats_dict[mode]['mAP']:
             self.stats_dict[mode]['mAP'][iou_thresh] = {}
 
-        conf_threshs = np.linspace(start=0.5, stop=0.95, num=60)
+        conf_threshs = np.linspace(start=0.05, stop=0.95, num=60)
         for c_t in conf_threshs:
             c_t = round(c_t, 3)
             if c_t not in self.stats_dict[mode]['mAP'][iou_thresh]:
                 self.stats_dict[mode]['mAP'][iou_thresh][c_t] = {'tp': 0, 'fp': 0}
 
-            src_logits = outputs['pred_logits']     # only get logits, that have corresponding label
+            src_logits = outputs['pred_logits'].cpu().detach()     # only get logits, that have corresponding label
             conf_mask = torch.full(src_logits.shape, fill_value=False)
             conf_mask[src_logits>=c_t] = True       # mask for conf logits that are greater than thresh
-            bb_filtered = outputs['pred_boxes'][conf_mask & labels_mask]
+            bb_filtered = outputs['pred_boxes'][conf_mask & labels_mask].cpu().detach()
             labels_filtered = labels[conf_mask & labels_mask][...,1:]
             fp_conf = src_logits[~conf_mask & labels_mask].numel()  # fp through conf: has corresp label but is below conf level
-            res = self.computeIOU(bb_filtered, labels_filtered, iou_thresh=iou_thresh)
+            res = self.computeIOU(bb_filtered, labels_filtered)
 
             fp_iou = res[res<iou_thresh].numel()
             tp = res.numel() - fp_iou
@@ -219,16 +220,7 @@ class BasicLogger():
         bb_pred = box_cxcywh_to_xyxy(bb_pred)
         bb_label = box_cxcywh_to_xyxy(bb_label)
         iou = box_iou(bb_pred, bb_label)[0]
-        return iou
-
-    def printCF(self, thresh=0.5, mode='val'):
-        t_idx = np.argmin(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
-        t = [t for t in self.stats_dict[mode]['PR']][t_idx]
-        data = self.stats_dict[mode]['PR'][t]
-        print("CF Objectness:", end="\t")
-        for k in data:
-            print(f"{k}: {data[k]}", end="\t\t")
-        print("\n")
+        return torch.diag(iou)
 
     def computeCFMetrics(self, outputs, queries_mask, labels_mask, thresh = 0.5):
         # Computes TP / FP / TN / FN for given threshold
@@ -254,14 +246,37 @@ class BasicLogger():
         if mode not in self.stats_dict:
             self.stats_dict[mode] = {}
         self.computePRData(outputs, queries_mask, labels_mask, mode=mode)
-        self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=0.5, mode='val'):
+        self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=0.5, mode='val')
 
     def resetStats(self):
         self.stats_dict = {}
 
-    def saveLogs(self, path):
+    def print_mAP50(self, mode="val"):
+        result = []
+        target_dict = self.stats_dict[mode]['mAP'][0.5]
+        for ct in target_dict:
+            tp = target_dict[ct]['tp']
+            fp = target_dict[ct]['fp']
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            result.append(precision)
+        result = round(sum(result)/len(result), 4)
+        print("mAP@50: ", round(sum(result)/len(result), 4))
+        self.stats_output['mAP@50'] = result
+        return result 
+
+    def printCF(self, thresh=0.5, mode='val'):
+        t_idx = np.argmin(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
+        t = [t for t in self.stats_dict[mode]['PR']][t_idx]
+        data = self.stats_dict[mode]['PR'][t]
+        print("CF Objectness:", end="\t")
+        for k in data:
+            print(f"{k}: {data[k]}", end="\t\t")
+        print()
+        self.stats_output['CF Objectness'] = data
+
+    def saveLossLogs(self, path):
         # Arg: path to training results folder
-        with open(os.path.join(path, 'log.txt'), 'w') as file:
+        with open(os.path.join(path, 'log_loss.txt'), 'w') as file:
             for epoch in self.entries:
                 for mode in self.entries[epoch]:
                     results = self.entries[epoch][mode]
@@ -272,6 +287,14 @@ class BasicLogger():
                     line = f"Epoch {epoch} ({mode}):".ljust(20) + \
                         "".join([str(f"{k}: {round(v,3)}".ljust(25)) for k,v in results.items()])
                     file.write(line + "\n")
+
+    def saveStatsLogs(self, path, epoch):
+        # Arg: path to training results folder
+        with open(os.path.join(path, 'log_stats.txt'), 'a') as file:
+            start = f"Epoch {epoch}:".ljust(12)
+            content = "".join([str(f"{k}: {v}".ljust(20)) for k,v in self.stats_output.items() if not isinstance(v,dict)])
+            content_dict = "".join([str(f"{k}: {v}".ljust(20)) for k, v in {v for v in self.stats_output.values() if isinstance(v, dict)}.items()])
+            file.write(start + content + content_dict + "\n")
 
     def plotPRCurve(self, path, mode='val'):
         pr_pairs = []

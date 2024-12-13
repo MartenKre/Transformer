@@ -137,11 +137,13 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
                 logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
 
     if logger is not None:
-        losses ={"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
+        results = {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
                 "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
         logger.updateLosses(losses, epoch, 'val')
-        logger.printCF(thresh = 0.5, mode='val') # Print Confusion Matrix for threshold of 0.5
-        return losses
+        logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
+        map50 = logger.print_mAP50(mode='val')
+        results['mAP50'] = map50
+        return results
     else:
         return None
 
@@ -272,7 +274,7 @@ if transfer_learning:
 logger = BasicLogger()
 print("Start training")
 start_time = time.time()
-best_loss = math.inf
+best_map = 0
 for epoch in range(start_epoch, epochs):
     logger.resetStats() # clear logger for new epoch
 
@@ -286,12 +288,13 @@ for epoch in range(start_epoch, epochs):
     if output_dir:
         if not os.path.isdir(output_dir):
             os.makedirs(output_dir, exist_ok=True)
-        logger.saveLogs(output_dir)
+        logger.saveLossLogs(output_dir)
+        logger.saveStatsLogs(output_dir, epoch)
         logger.plotLoss(output_dir)
-        if val_results["loss_total"] < best_loss:
+        if val_results["mAP50"] < best_map:
             print("Saved new model as best.pht")
             logger.plotPRCurve(path=output_dir, mode='val')
-            best_loss = val_results["loss_total"]
+            best_map = val_results["mAP50"]
             save_on_master({
                 'model': model_without_ddp.state_dict(),
                 'optimizer': optimizer.state_dict(),
