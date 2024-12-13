@@ -21,6 +21,8 @@ from torch import Tensor
 
 # needed due to empty tensor bug in pytorch and torchvision 0.5
 import torchvision
+
+from util.box_ops import box_cxcywh_to_xyxy, box_iou
 if version.parse(torchvision.__version__) < version.parse('0.7'):
     from torchvision.ops import _new_empty_tensor
     from torchvision.ops.misc import _output_size
@@ -188,8 +190,36 @@ class BasicLogger():
             else:
                 self.stats_dict[mode]['PR'][t] = {k: res[k]+self.stats_dict[mode]['PR'][t][k] for k in res}
 
-    def computeAP(self):
-        pass
+    def compute_mAPData(self, iou_thresh, outputs, labels, queries_mask, labels_mask, mode='val'):
+        if 'mAP' not in self.stats_dict[mode]:
+            self.stats_dict[mode]['mAP'] = {}
+        if iou_thresh not in self.stats_dict[mode]['mAP']:
+            self.stats_dict[mode]['mAP'][iou_thresh] = {}
+
+        conf_threshs = np.linspace(start=0.5, stop=0.95, num=60)
+        for c_t in conf_threshs:
+            c_t = round(c_t, 3)
+            if c_t not in self.stats_dict[mode]['mAP'][iou_thresh]:
+                self.stats_dict[mode]['mAP'][iou_thresh][c_t] = {'tp': 0, 'fp': 0}
+
+            src_logits = outputs['pred_logits']     # only get logits, that have corresponding label
+            conf_mask = torch.full(src_logits.shape, fill_value=False)
+            conf_mask[src_logits>=c_t] = True       # mask for conf logits that are greater than thresh
+            bb_filtered = outputs['pred_boxes'][conf_mask & labels_mask]
+            labels_filtered = labels[conf_mask & labels_mask][...,1:]
+            fp_conf = src_logits[~conf_mask & labels_mask].numel()  # fp through conf: has corresp label but is below conf level
+            res = self.computeIOU(bb_filtered, labels_filtered, iou_thresh=iou_thresh)
+
+            fp_iou = res[res<iou_thresh].numel()
+            tp = res.numel() - fp_iou
+            self.stats_dict[mode]['mAP'][iou_thresh][c_t]['tp'] += tp
+            self.stats_dict[mode]['mAP'][iou_thresh][c_t]['fp'] += (fp_iou + fp_conf)
+
+    def computeIOU(self, bb_pred, bb_label):
+        bb_pred = box_cxcywh_to_xyxy(bb_pred)
+        bb_label = box_cxcywh_to_xyxy(bb_label)
+        iou = box_iou(bb_pred, bb_label)[0]
+        return iou
 
     def printCF(self, thresh=0.5, mode='val'):
         t_idx = np.argmin(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
@@ -224,6 +254,7 @@ class BasicLogger():
         if mode not in self.stats_dict:
             self.stats_dict[mode] = {}
         self.computePRData(outputs, queries_mask, labels_mask, mode=mode)
+        self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=0.5, mode='val'):
 
     def resetStats(self):
         self.stats_dict = {}
