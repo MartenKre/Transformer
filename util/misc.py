@@ -284,7 +284,7 @@ class BasicLogger():
                 inter.append(precision)
             map_i = sum(inter)/len(inter)
             result.append(map_i)
-        result = round(sum(inter)/len(inter), 4)
+        result = round(sum(result)/len(result), 4)
         print("mAP@[.5:.95]: ", result)
         self.stats_output['mAP@[.5:.95]'] = result
         return result 
