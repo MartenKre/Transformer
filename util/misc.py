@@ -216,6 +216,12 @@ class BasicLogger():
             self.stats_dict[mode]['mAP'][iou_thresh][c_t]['tp'] += tp
             self.stats_dict[mode]['mAP'][iou_thresh][c_t]['fp'] += (fp_iou + fp_conf)
 
+    def compute_mAP50_95(self, outputs, labels, queries_mask, labels_mask, mode='val'):
+        threshs = np.arange(start=0.5, stop=1, step=0.05)
+        for iou_thresh in threshs:
+            self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=iou_thresh, mode=mode)
+        
+
     def computeIOU(self, bb_pred, bb_label):
         bb_pred = box_cxcywh_to_xyxy(bb_pred)
         bb_label = box_cxcywh_to_xyxy(bb_label)
@@ -246,7 +252,8 @@ class BasicLogger():
         if mode not in self.stats_dict:
             self.stats_dict[mode] = {}
         self.computePRData(outputs, queries_mask, labels_mask, mode=mode)
-        self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=0.5, mode='val')
+        self.fcompute_mAP50_95(outputs, labels, queries_mask, labels_mask, mode='val')
+        # self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=0.5, mode='val')
 
     def resetStats(self):
         self.stats_dict = {}
@@ -262,6 +269,24 @@ class BasicLogger():
         result = round(sum(result)/len(result), 4)
         print("mAP@50: ", result)
         self.stats_output['mAP@50'] = result
+        return result 
+
+    def print_mAP50_95(self, mode="val"):
+        result = []
+        threshs = np.arange(0.5, 1, 0.05)
+        for i in threshs:
+            inter = []
+            target_dict = self.stats_dict[mode]['mAP'][i]
+            for ct in target_dict:
+                tp = target_dict[ct]['tp']
+                fp = target_dict[ct]['fp']
+                precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+                inter.append(precision)
+            map_i = sum(inter)/len(inter)
+            result.append(map_i)
+        result = round(sum(inter)/len(inter), 4)
+        print("mAP@[.5:.95]: ", result)
+        self.stats_output['mAP@[.5:.95]'] = result
         return result 
 
     def printCF(self, thresh=0.5, mode='val'):

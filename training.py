@@ -142,6 +142,7 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
         logger.updateLosses(results, epoch, 'val')
         logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
         map50 = logger.print_mAP50(mode='val')
+        logger.print_mAP50_95(mode="val")
         results['mAP50'] = map50
         return results
     else:
