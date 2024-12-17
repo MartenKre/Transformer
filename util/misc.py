@@ -221,7 +221,6 @@ class BasicLogger():
         for iou_thresh in threshs:
             self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=iou_thresh, mode=mode)
         
-
     def computeIOU(self, bb_pred, bb_label):
         bb_pred = box_cxcywh_to_xyxy(bb_pred)
         bb_label = box_cxcywh_to_xyxy(bb_label)
