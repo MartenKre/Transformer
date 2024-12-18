@@ -133,16 +133,16 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "/home/marten/Uni/Semester_4/src/Transformer/run_MLP4_augment/best.pth"
-path_to_video = "/home/marten/Uni/Semester_4/src/TestData/955_2.avi"
-path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
-#path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
-#path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
-path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi"
-path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt"
+path_to_weights = "/home/marten/Uni/Semester_4/src/Transformer/run_MLP5/best.pth"
+path_to_video = "/home/marten/Uni/Semester_4/src/TestData/954_2.avi"
+path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_954.txt"
+# path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
+# path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
+# path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi"
+# path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt"
 
 # General settings
-conf_thresh = 0.5    # threshhold of objectness pred -> only queries with pred_conf >= conf_thresh will be visualized
+conf_thresh = 0.95    # threshhold of objectness pred -> only queries with pred_conf >= conf_thresh will be visualized
 resize_coeffs = [0.5, 0.5] # applied to image before inference, 0 -> x, 1 -> y
 
 # Model settings:
@@ -199,7 +199,7 @@ while cap.isOpened():
     ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
     if buoyGTData.checkForRefresh(*ship_pose[0:2]):
         buoys_on_tile = buoyGTData.getBuoyLocations(*ship_pose[0:2])
-    buoys_filtered = filterBuoys(ship_pose, buoys_on_tile, fov_with_padding=110, dist_thresh=1000, nearby_thresh=30)
+    buoys_filtered = filterBuoys(ship_pose, buoys_on_tile)
     queries = torch.tensor(createQueryData(ship_pose, buoys_filtered), dtype=torch.float32)[...,0:2]
 
     colors = []

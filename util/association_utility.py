@@ -133,7 +133,7 @@ def haversineDist(lat1, lon1, lat2, lon2):
     r = 6371 # Radius of earth in kilometers. Use 3956 for miles. Determines return value units.
     return c * r * 1e3
 
-def filterBuoys(ship_pose, buoyCoords, fov_with_padding=110, dist_thresh=1000, nearby_thresh=30):
+def filterBuoys(ship_pose, buoyCoords, fov_with_padding=110, dist_thresh=1000, nearby_thresh=50):
     """function selects nearby gt buoys (relative to ship pos) from a list containing buoy Coordinates
     Args:
         ship_pose: list of form [lat,lng,heading]
