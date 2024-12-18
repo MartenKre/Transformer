@@ -92,6 +92,8 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
 
             optimizer.step()
 
+            break
+
     if logger is not None:
         losses ={"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
                 "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}

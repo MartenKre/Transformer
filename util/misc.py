@@ -251,7 +251,7 @@ class BasicLogger():
         if mode not in self.stats_dict:
             self.stats_dict[mode] = {}
         self.computePRData(outputs, queries_mask, labels_mask, mode=mode)
-        self.fcompute_mAP50_95(outputs, labels, queries_mask, labels_mask, mode='val')
+        self.compute_mAP50_95(outputs, labels, queries_mask, labels_mask, mode='val')
         # self.compute_mAPData(outputs, labels, queries_mask, labels_mask, iou_thresh=0.5, mode='val')
 
     def resetStats(self):
