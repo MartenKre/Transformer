@@ -171,7 +171,7 @@ model.eval()
 
 print("Loading Weights...")
 checkpoint = torch.load(path_to_weights, map_location=device)
-model.load_state_dict(checkpoint['model'], strict=False)
+model.load_state_dict(checkpoint['model'], strict=True)
 
 n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print('Number of params:', n_parameters)
