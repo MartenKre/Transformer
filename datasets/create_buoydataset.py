@@ -41,7 +41,7 @@ def labelsJSON2Yolo(labels, queries, ship_pose):
     return result 
 
 # Settings:
-mode = 'train' # train or test
+mode = 'test' # train or test
 verbose = True
 resize_imgs = True
 resize_coeffs = [0.5, 0.5]

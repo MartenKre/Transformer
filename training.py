@@ -92,8 +92,6 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
 
             optimizer.step()
 
-            break
-
     if logger is not None:
         losses ={"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
                 "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
@@ -181,7 +179,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 distributed = False
 
 # Dataset
-path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml"
+# path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml"
+path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/dataset.yaml"
 if distributed:
     path_to_dataset = "/data/mkreis/dataset/dataset.yaml"
 
@@ -193,7 +192,7 @@ giou_loss_coef = 5
 
 # Optimizer / DataLoader
 lr = 1e-4
-batch_size=4
+batch_size=2
 if distributed:
     batch_size = 2*torch.cuda.device_count()
 weight_decay=1e-3

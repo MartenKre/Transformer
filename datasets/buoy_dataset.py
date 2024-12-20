@@ -8,9 +8,12 @@ import os
 import numpy as np
 import cv2
 import random
+import warnings
 
 from util.box_ops import box_cxcywh_to_xyxy, box_iou
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 def collate_fn(batch):
     img, queries, labels, queries_mask, labels_mask, name = zip(*batch)
@@ -69,7 +72,7 @@ class BuoyDataset(Dataset):
     def checkdataset(self):
         for label, image, query in zip(self.labels, self.images, self.queries):
             if not image.split(".")[0] == label.split('.')[0] == query.split('.')[0]:
-                print(f"Warning: {label}, {image}, {query}")
+                print(f"Warning, file not matching: {label}, {image}, {query}")
 
     def __len__(self):
         return len(self.labels)
@@ -77,7 +80,8 @@ class BuoyDataset(Dataset):
     def flip_img(self, img, labels, queries):
         # flips image horizontally 
         img = cv2.flip(img, 1)
-        labels[:,1] = 1 - labels[:,1]
+        if labels.numel() > 0:
+            labels[:,1] = 1 - labels[:,1]
         queries[:,-1] *= -1
         return img, labels, queries
 
@@ -103,12 +107,14 @@ class BuoyDataset(Dataset):
         queries[..., 2] = queries[..., 2] / 180 # normalize angle between -1 to 1
 
         labels_extended = torch.zeros(queries.size(dim=0), 5, dtype=torch.float32)
-        labels_extended[labels[:, 0].int(), :] = labels[:, :]
+        if labels.numel() > 0:
+            labels_extended[labels[:, 0].int(), :] = labels[:, :]
 
-        labels_mask = torch.full((1, labels_extended.size(dim=0)), fill_value=False).squeeze(0)
-        labels_mask[labels[:, 0].int()] = True
+        labels_mask = torch.full((labels_extended.size(dim=0),), fill_value=False)
+        if labels.numel() > 0:
+            labels_mask[labels[:, 0].int()] = True
 
-        queries_mask = torch.full((1,queries.size(dim=0)), fill_value=True).squeeze(0)
+        queries_mask = torch.full((queries.size(dim=0),), fill_value=True)
 
         if self.transform:
             img = self.transform(img)
