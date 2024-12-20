@@ -8,7 +8,7 @@ import shutil
 import cv2
 from util.association_utility import GetGeoData, getIMUData, filterBuoys, createQueryData, haversineDist
 
-def labelsJSON2Yolo(labels, queries):
+def labelsJSON2Yolo(labels, queries, ship_pose):
     # fuction converts json data to yolo format with corresponding query ID
     result = []
     for BB in labels[1]["objects"]:
@@ -20,8 +20,9 @@ def labelsJSON2Yolo(labels, queries):
             queryID = np.argmin(distances)
             if distances[queryID] > 30:
                 if verbose:
-                    print("\t \t Warning: No distance between query Buoy and Label buoy exceeds thresh")
-                    print(lat_BB, lng_BB, distances)
+                    print("\t \t Skipping: Distance between query Buoy and Label buoy exceeds thresh")
+                    print("\t \t Distances to queries: ", [round(x) for x in distances])
+                    print("\t \t Distance to camera: ", round(haversineDist(lat_BB, lng_BB, *ship_pose[:2])))
                 return None
            
             # get BB info in yolo format
@@ -40,11 +41,11 @@ def labelsJSON2Yolo(labels, queries):
     return result 
 
 # Settings:
-mode = 'test' # train or test
-verbose = False
+mode = 'train' # train or test
+verbose = True
 resize_imgs = True
 resize_coeffs = [0.5, 0.5]
-target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1"
+target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2"
 data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/"
 os.makedirs(target_dir, exist_ok=True)
 
@@ -103,13 +104,13 @@ for folder in datafolders:
             # create labels file
             src_path = os.path.join(labels, sample+".json")
             label_data = json.load(open(src_path, 'r'))
-            txtlabels = labelsJSON2Yolo(label_data, queries)
-            if txtlabels is None:
+            txtlabels = labelsJSON2Yolo(label_data, queries, ship_pose)
+            if txtlabels is None: # if dist between label buoy and query buoy too large -> skip 
                 continue
-            if len(txtlabels) == 0:
+            if len(txtlabels) == 0: # if labels file empty
                 if verbose:
-                    print(f"\t \t skipping empty labels file: {src_path}")
-                continue
+                    print(f"\t \t Warning: Empty labels file: {src_path}")
+                #continue
             labelfile = os.path.join(target_dir, "labels", sample_name + '.txt')
 
 
