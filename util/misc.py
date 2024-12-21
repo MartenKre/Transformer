@@ -349,6 +349,7 @@ class BasicLogger():
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.savefig(os.path.join(path, 'PR_Curve.pdf'))
+        plt.close()
 
     def plotLoss(self, path):
         epochs = [k for k in self.entries]
@@ -363,6 +364,7 @@ class BasicLogger():
         ax.set_xlabel("Epochs")
 
         plt.savefig(os.path.join(path, 'Loss.pdf'))
+        plt.close()
 
 
 class MetricLogger(object):
