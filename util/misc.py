@@ -375,7 +375,8 @@ class BasicLogger():
                         [self.stats_dict[mode]['PR'][t]['fn'], self.stats_dict[mode]['PR'][t]['tn']]]
         plt.figure()
         seaborn.heatmap(heatmap_data, annot = [["P", "N"], ["P", "N"]])
-
+        plt.savefig(os.path.join(path, 'ConfMat.pdf'))
+        plt.close()
 
 
 class MetricLogger(object):
