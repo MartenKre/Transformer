@@ -350,6 +350,7 @@ class BasicLogger():
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.savefig(os.path.join(path, 'PR_Curve.pdf'))
+        plt.close()
 
     def plotLoss(self, path):
         epochs = [k for k in self.entries]
@@ -364,6 +365,7 @@ class BasicLogger():
         ax.set_xlabel("Epochs")
 
         plt.savefig(os.path.join(path, 'Loss.pdf'))
+        plt.close()
 
     def plotConfusionMat(self, path, thresh = 0.5, mode='val'):
         t = np.min(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
