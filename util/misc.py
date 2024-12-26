@@ -12,6 +12,7 @@ import datetime
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn
 from packaging import version
 from typing import Optional, List
 
@@ -363,6 +364,16 @@ class BasicLogger():
         ax.set_xlabel("Epochs")
 
         plt.savefig(os.path.join(path, 'Loss.pdf'))
+
+    def plotConfusionMat(self, path, thresh = 0.5, mode='val'):
+        t = np.min(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
+        data = self.stats_dict[mode]['PR'][t]
+        self.stats_output['CF Objectness'] = data
+        heatmap_data = [[self.stats_dict[mode]['PR'][t]['tp'], self.stats_dict[mode]['PR'][t]['fp']], 
+                        [self.stats_dict[mode]['PR'][t]['fn'], self.stats_dict[mode]['PR'][t]['tn']]]
+        plt.figure()
+        seaborn.heatmap(heatmap_data, annot = [["P", "N"], ["P", "N"]])
+
 
 
 class MetricLogger(object):
