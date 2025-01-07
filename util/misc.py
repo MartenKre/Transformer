@@ -317,8 +317,8 @@ class BasicLogger():
         # Arg: path to training results folder
         with open(os.path.join(path, 'log_stats.txt'), 'a') as file:
             start = f"Epoch {epoch}:".ljust(12)
-            content = "".join([str(f"{k}: {v}".ljust(20)) for k,v in self.stats_output.items() if not isinstance(v,dict)])
-            content_dict = "".join([str(f"{k}: {v}".ljust(20)) for d in [v for v in self.stats_output.values() if isinstance(v, dict)] for k, v in d.items()])
+            content = "".join([str(f"{k}: {v}".ljust(21)) for k,v in self.stats_output.items() if not isinstance(v,dict)])
+            content_dict = "".join([str(f"{k}: {v}".ljust(21)) for d in [v for v in self.stats_output.values() if isinstance(v, dict)] for k, v in d.items()])
             file.write(start + content + content_dict + "\n")
 
     def plotPRCurve(self, path, mode='val'):
