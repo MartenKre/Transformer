@@ -296,6 +296,7 @@ for epoch in range(start_epoch, epochs):
         if val_results["mAP50"] > best_map:
             print("Saved new model as best.pht")
             logger.plotPRCurve(path=output_dir, mode='val')
+            logger.plotConfusionMat(path=output_dir, thresh = 0.5, mode='val')
             best_map = val_results["mAP50"]
             save_on_master({
                 'model': model_without_ddp.state_dict(),

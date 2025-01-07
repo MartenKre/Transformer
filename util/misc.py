@@ -374,7 +374,8 @@ class BasicLogger():
         heatmap_data = [[self.stats_dict[mode]['PR'][t]['tp'], self.stats_dict[mode]['PR'][t]['fp']], 
                         [self.stats_dict[mode]['PR'][t]['fn'], self.stats_dict[mode]['PR'][t]['tn']]]
         plt.figure()
-        seaborn.heatmap(heatmap_data, annot = [["P", "N"], ["P", "N"]])
+        cp = seaborn.heatmap(heatmap_data, annot = [["P", "N"], ["P", "N"]])
+        cp.set(xlabel="Actual", ylabel="Predicted", title="Confusion Matrix Confidence")
         plt.savefig(os.path.join(path, 'ConfMat.pdf'))
         plt.close()
 
