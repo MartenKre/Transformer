@@ -47,7 +47,9 @@ resize_imgs = True
 resize_coeffs = [0.5, 0.5]
 target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2"
 data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/"
-os.makedirs(target_dir, exist_ok=True)
+if os.path.exists(target_dir):
+    raise ValueError("Aborting... Specified target dir already exists:", target_dir)
+os.makedirs(target_dir, exist_ok=False)
 
 buoyGTData = GetGeoData()
 
