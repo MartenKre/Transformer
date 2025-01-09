@@ -368,13 +368,14 @@ class BasicLogger():
         plt.close()
 
     def plotConfusionMat(self, path, thresh = 0.5, mode='val'):
-        t = np.min(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
+        t = np.argmin(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
+        t = [x for x in self.stats_dict[mode]['PR']][t]
         data = self.stats_dict[mode]['PR'][t]
         self.stats_output['CF Objectness'] = data
         heatmap_data = [[self.stats_dict[mode]['PR'][t]['tp'], self.stats_dict[mode]['PR'][t]['fp']], 
                         [self.stats_dict[mode]['PR'][t]['fn'], self.stats_dict[mode]['PR'][t]['tn']]]
         plt.figure()
-        cp = seaborn.heatmap(heatmap_data, annot = [["P", "N"], ["P", "N"]])
+        cp = seaborn.heatmap(heatmap_data, annot=True, fmt="d", xticklabels=['P', 'N'], yticklabels=["P", "N"])
         cp.set(xlabel="Actual", ylabel="Predicted", title="Confusion Matrix Confidence")
         plt.savefig(os.path.join(path, 'ConfMat.pdf'))
         plt.close()

@@ -47,9 +47,9 @@ resize_imgs = True
 resize_coeffs = [0.5, 0.5]
 target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2"
 data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/"
-if os.path.exists(target_dir):
-    raise ValueError("Aborting... Specified target dir already exists:", target_dir)
-os.makedirs(target_dir, exist_ok=False)
+if os.path.exists(os.path.join(target_dir,mode)):
+    raise ValueError("Aborting... Specified target dir already exists:", os.path.join(target_dir, mode))
+os.makedirs(target_dir, exist_ok=True)
 
 buoyGTData = GetGeoData()
 
@@ -58,7 +58,7 @@ if mode == 'train':
     target_dir = os.path.join(target_dir, "train")
 if mode == 'test':
     target_dir = os.path.join(target_dir, "test")
-os.makedirs(target_dir, exist_ok=True)
+os.makedirs(target_dir, exist_ok=False)
 os.makedirs(os.path.join(target_dir, "images"), exist_ok=True)
 os.makedirs(os.path.join(target_dir, "labels"), exist_ok=True)
 os.makedirs(os.path.join(target_dir, "queries"), exist_ok=True)
