@@ -182,7 +182,7 @@ distributed = False
 # path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml"
 path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/dataset.yaml"
 if distributed:
-    path_to_dataset = "/data/mkreis/dataset/dataset.yaml"
+    path_to_dataset = "/data/mkreis/dataset2/dataset.yaml"
 
 # Loss
 aux_loss = True
@@ -191,10 +191,10 @@ bbox_loss_coef = 2
 giou_loss_coef = 5
 
 # Optimizer / DataLoader
-lr = 1e-4
+lr = 2e-4
 batch_size=2
 if distributed:
-    batch_size = 2*torch.cuda.device_count()
+    batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
 epochs=80
 lr_drop=200

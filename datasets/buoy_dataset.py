@@ -49,6 +49,7 @@ class BuoyDataset(Dataset):
         self.augment = augment
         self.augment_thresh = 0.5
         random.seed(0)
+        torch.manual_seed(0)
         self.processYAML()
 
         self.labels = sorted(os.listdir(os.path.join(self.data_path, "labels")))
@@ -85,6 +86,15 @@ class BuoyDataset(Dataset):
         queries[:,-1] *= -1
         return img, labels, queries
 
+    def queries_add_noise(self, queries, dist_coeff=15, bearing_coeff=10):
+        # adds noise to queries (dist, bearing) to simulate inaccuracy in chart data
+        noise = lambda: 2 * (torch.rand(queries.size(dim=0), dtype=torch.float32) - 0.5)
+        delta_dist = noise() * dist_coeff
+        delta_bearing = torch.atan2(noise() * bearing_coeff, queries[:, 1]) / torch.pi * 180
+        queries[:, 1] += delta_dist
+        queries[:, 2] += delta_bearing
+        return queries
+
     def __getitem__(self, index):
         img = cv2.imread(os.path.join(self.data_path, "images", self.images[index]))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -101,6 +111,7 @@ class BuoyDataset(Dataset):
 
         if self.augment and random.random() > self.augment_thresh:
             img, labels, queries = self.flip_img(img, labels, queries)
+            queries = self.queries_add_noise(queries)
 
         # normalize query inputs (dist and angle)
         queries[..., 1] = queries[..., 1] / 1000 # normalize dist between 0-1 (gets clamped later to max 1)
