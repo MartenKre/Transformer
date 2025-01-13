@@ -17,7 +17,7 @@ from torch import nn, Tensor
 
 class Transformer(nn.Module):
 
-    def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
+    def __init__(self, d_model=512, nhead=8, num_encoder_layers=6, num_encoder_zoom_layers = 4,
                  num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False,
                  return_intermediate_dec=False):
@@ -27,6 +27,11 @@ class Transformer(nn.Module):
                                                 dropout, activation, normalize_before)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+
+        encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
+                                                dropout, activation, normalize_before)
+        encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
+        self.encoder_zoom = TransformerEncoder(encoder_layer, num_encoder_zoom_layers, encoder_norm)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
@@ -44,16 +49,29 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, query_embed, pos_embed, query_mask):
+    def forward(self, src, query_embed, pos_embed, zoom_embed, zoom_pos_embed, query_mask):
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
         src = src.flatten(2).permute(2, 0, 1)
         pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
         query_embed = query_embed.permute(1, 0, 2)  # from NxSxH to SxNxH
 
+        zoom_embed = zoom_embed.flatten(2).permute(2, 0, 1)   # [h_z*w_z, n*seq_len, hidden]
+        n, seq_len, hidden, h_z, w_z = zoom_pos_embed.shape 
+        zoom_pos_embed1 = zoom_pos_embed.flatten(0,1).flatten(2).permute(2, 0, 1) # [h_z*w_z, n*seq_len, hidden]
+        zoom_mask = query_mask.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, h_z, w_z).flatten(1) #[n, seq_len, h_z, w_z] -> [n, seq_len*h_w*w_z]
+
         memory = self.encoder(src, pos=pos_embed)
-        hs = self.decoder(query_embed, memory, pos=pos_embed, tgt_key_padding_mask=query_mask)
-        return hs.transpose(1,2), memory.permute(1, 2, 0).view(bs, c, h, w)
+        memory2 = self.encoder_zoom(zoom_embed, pos=zoom_pos_embed1)
+        memory2 = memory2.view(h_z*w_z, n, seq_len, hidden).permute(2, 0, 1, 3).flatten(0, 1) # [seq_len*h_z*w_z, n, hidden]
+        memory = torch.cat((memory, memory2)) # [h*w + h_z*w_z*seq_len, n, hidden]
+        zoom_pos_embed2 = zoom_pos_embed.flatten(3).permute(1, 3, 0, 2).flatten(0, 1)    # [seq_len*h_z*w_z, n, hidden]
+        pos_embed = torch.cat((pos_embed, zoom_pos_embed2))
+        memory_mask = torch.ones(size=(memory.size(1), memory.size(0)), dtype=torch.bool, device=memory.device)
+        memory_mask[:, h*w:] = zoom_mask # [n, h*w+seq_len*h*w]
+        memory_mask = ~memory_mask
+        hs = self.decoder(query_embed, memory, pos=pos_embed, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=query_mask)
+        return hs.transpose(1,2)
 
 
 class TransformerEncoder(nn.Module):

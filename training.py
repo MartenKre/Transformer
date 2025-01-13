@@ -9,7 +9,7 @@ from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader
 from models.detr import DETR, SetCriterion
 from models.transformer import Transformer
-from models.backbone import Backbone, Joiner
+from models.backbone import Backbone, BackboneZoom, Joiner
 from models.position_encoding import PositionEmbeddingSine 
 from util.misc import save_on_master, BasicLogger
 
@@ -32,14 +32,22 @@ def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
     model.num_channels = backbone.num_channels
     return model
 
+def init_backbone_zoom(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
+    # masks are only used for image segmentation
 
-def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
+    train_backbone = lr_backbone > 0
+    return_interm_layers = False
+    backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
+    return model
+
+def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm):
     return Transformer(
         d_model=hidden_dim,
         dropout=dropout,
         nhead=nheads,
         dim_feedforward=dim_feedforward,
         num_encoder_layers=enc_layers,
+        num_encoder_zoom_layers=enc_zoom_layers,
         num_decoder_layers=dec_layers,
         normalize_before=pre_norm,
         return_intermediate_dec=True,
@@ -166,6 +174,7 @@ lr_backbone = 1e-5
 # Transformer
 hidden_dim = 256    # embedding dim
 enc_layers = 6      # encoding layers
+enc_zoom_layers = 4 # encoding layers
 dec_layers = 6      # decoding layers
 dim_feedforward = 2048  # dim of ff layers in transformer layers
 dropout = 0.1
@@ -206,9 +215,11 @@ if distributed:
 
 # Init Model
 backbone = init_backbone(lr_backbone, hidden_dim)
-transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm)
+backbone_zoom = BackboneZoom(name='resnet50', train_backbone=True if lr_backbone > 0 else False)
+transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm)
 model = DETR(
     backbone,
+    backbone_zoom,
     transformer,
     input_dim_gt=2,
     aux_loss=aux_loss,

@@ -69,7 +69,7 @@ class BackboneBase(nn.Module):
         self.num_channels = num_channels
 
     def forward(self, img):
-        xs = self.body(img)["0"] # output is value with coresp key '0' (layer 4), since we dont return interm_layers
+        xs = self.body(img)["0"]
         return xs
 
 
@@ -96,6 +96,24 @@ class Joiner(nn.Sequential):
 
         return xs, pos
 
+class BackboneZoomBase(nn.Module):
+    def __init__(self, backbone: nn.Module, train_backbone: bool):
+        super().__init__()
+        for name, parameter in backbone.named_parameters():
+            if not train_backbone or 'layer1' not in name and "conv1.weight" != name and "bn1.weight" != name and "bn1.bias" != name:
+                parameter.requires_grad_(False)
+        return_layers = {'layer1': "0"}
+        self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+
+    def forward(self, img):
+        xs = self.body(img)["0"]
+        return xs
+
+class BackboneZoom(BackboneZoomBase):
+    """ResNet backbone with frozen BatchNorm."""
+    def __init__(self, name: str, train_backbone: bool):
+        backbone = getattr(torchvision.models, name)(weights=is_main_process(), norm_layer=FrozenBatchNorm2d)
+        super().__init__(backbone, train_backbone)
 
 def build_backbone(args):
     position_embedding = build_position_encoding(args)
