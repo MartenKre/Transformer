@@ -4,6 +4,7 @@ DETR model and criterion classes.
 """
 from json import encoder
 import torch
+import matplotlib.pyplot as plt
 import torch.nn.functional as F
 from torch import angle, nn
 
@@ -69,6 +70,18 @@ class DETR(nn.Module):
                     fmaps[b,s,:,:,:] = nn.functional.interpolate(extracted, size=(size[0], size[1]), mode='bilinear').squeeze(0)
         return fmaps
 
+    def plot_zoom_features(self, zoom_features):
+        num_images = zoom_features.size(1)
+        for i, image in enumerate(zoom_features[0]):
+            img_np = image.permute(1,2,0).cpu().numpy()
+            plt.subplot(1, num_images, i+1)
+            plt.imshow(img_np)
+            plt.title(str(i))
+
+        plt.savefig("zoom_plots.pdf")
+        plt.close()
+        print("Plot saved")
+
     def forward(self, images, queries, queries_mask):
         """ The forward expects a NestedTensor, which consists of:
                - images.tensor: batched images, of shape [batch_size x 3 x H x W]
@@ -98,12 +111,19 @@ class DETR(nn.Module):
             decoder_embed = self.query_embed(queries)
 
         # get zoom_features
+        print("Queries:")
+        print(queries.cpu())
         zoom_coords = self.zoom_embed(decoder_embed).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
         zoom_coords[..., 0] *= images.size(3)
         zoom_coords[..., 1] *= images.size(2)
         zoom_coords[..., 2] *= images.size(3)
         zoom_coords[..., 3] *= images.size(2)
+        print("Zoom_coords:")
+        print(zoom_coords.cpu())
         zoom_features = self.get_zoom_features(images, zoom_coords, queries_mask)   # [N, seq_len (num_q), 3, h_resize, w_resize]
+
+        self.plot_zoom_features(zoom_features)
+
         # pass zoom features through backbone
         zoom_features = self.backbone_zoom(zoom_features.flatten(start_dim=0, end_dim=1))   #[NxSeq_len (num_q), 3, h_resize, w_resize] -> [NxSeq_len, hidden, h_resize/4, w_resize/4]
         zoom_pos_encode = pos_encode_zoom(fmap_shape=(zoom_coords.size(0), zoom_coords.size(1), *zoom_features.size()[1:]), 
