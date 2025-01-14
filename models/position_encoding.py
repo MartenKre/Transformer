@@ -47,23 +47,16 @@ class PositionEmbeddingSine(nn.Module):
         return pos
 
 @torch.no_grad
-def pos_encode_zoom(fmap_shape, zoom_coords, img, temperature=10000):
+def pos_encode_zoom(fmap_shape, zoom_coords, temperature=10000):
         b, n_z, hidden, h, w = fmap_shape
         num_pos_feats = hidden // 2
         result = torch.zeros(b, n_z, hidden, h, w, device=zoom_coords.device)
-        y1 = torch.round(zoom_coords[:, :, 1] - zoom_coords[:, :, 3]/2).int()
-        y1[y1 < 0] = 0
-        y2 = torch.round(zoom_coords[:, :, 1] + zoom_coords[:, :, 3]/2).int()
-        y2[y2 > img.size(2)] = img.size(2)
-        x1 = torch.round(zoom_coords[:, :, 0] - zoom_coords[:, :, 2]/2).int()
-        x1[x1 < 0] = 0
-        x2 = torch.round(zoom_coords[:, :, 0] + zoom_coords[:, :, 2]/2).int()
-        x2[x2 > img.size(3)] = img.size(3)
         for b in range(0, b):
             for i in range(0, n_z):
-                y_embed = torch.linspace(y1[b,i], y2[b,i], h, dtype=torch.float32, device=zoom_coords.device)
+                y1, y2, x1, x2 = zoom_coords[b,i]
+                y_embed = torch.linspace(y1, y2, h, dtype=torch.float32, device=zoom_coords.device)
                 y_embed = y_embed.repeat(w, 1).transpose(0,1)
-                x_embed = torch.linspace(x1[b,i], x2[b,i], w, dtype=torch.float32, device=zoom_coords.device)
+                x_embed = torch.linspace(x1, x2, w, dtype=torch.float32, device=zoom_coords.device)
                 x_embed = x_embed.repeat(h, 1)
 
                 dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=zoom_coords.device)

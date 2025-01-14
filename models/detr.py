@@ -23,7 +23,7 @@ from .transformer import build_transformer
 
 class DETR(nn.Module):
     """ This is the DETR module that performs object detection """
-    def __init__(self, backbone, backbone_zoom, transformer, input_dim_gt, aux_loss=False, use_embeddings=False):
+    def __init__(self, backbone, transformer, input_dim_gt, aux_loss=False, use_embeddings=False):
         """ Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
@@ -36,10 +36,6 @@ class DETR(nn.Module):
         self.objectness_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
 
-        # used for determining buoy BBs 
-        self.visible_embed = nn.Linear(hidden_dim, 1)
-        self.zoom_embed = nn.Linear(hidden_dim, 4)
-
         if not use_embeddings:
             self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
         else:
@@ -47,40 +43,9 @@ class DETR(nn.Module):
             self.query_embed_2 = nn.Embedding(80, int(hidden_dim/input_dim_gt))
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
-        self.backbone_zoom = backbone_zoom
         self.aux_loss = aux_loss
         # test
         self.use_embeddings = use_embeddings
-
-    def get_zoom_features(self, img, zoom_coords, query_mask, size=[50, 50]):   # img:[N, 3, H, W]
-        # size: size in px (height, width) of 
-        fmaps = torch.zeros((img.size(0), zoom_coords.size(1), 3, size[0], size[1]), device=img.device)    # [N, seq_len, 3, h_resize, w_resize]
-        y1 = torch.round(zoom_coords[:, :, 1] - zoom_coords[:, :, 3]/2).int()
-        y1[y1 < 0] = 0
-        y2 = torch.round(zoom_coords[:, :, 1] + zoom_coords[:, :, 3]/2).int()
-        y2[y2 > img.size(2)] = img.size(2)
-        x1 = torch.round(zoom_coords[:, :, 0] - zoom_coords[:, :, 2]/2).int()
-        x1[x1 < 0] = 0
-        x2 = torch.round(zoom_coords[:, :, 0] + zoom_coords[:, :, 2]/2).int()
-        x2[x2 > img.size(3)] = img.size(3)
-        for b in range(0, img.size(0)):
-            for s in range(0, zoom_coords.size(1)):
-                if query_mask[b, s]:
-                    extracted = img[b, :, y1[b,s]:y2[b,s], x1[b,s]:x2[b,s]].unsqueeze(0)
-                    fmaps[b,s,:,:,:] = nn.functional.interpolate(extracted, size=(size[0], size[1]), mode='bilinear').squeeze(0)
-        return fmaps
-
-    def plot_zoom_features(self, zoom_features):
-        num_images = zoom_features.size(1)
-        for i, image in enumerate(zoom_features[0]):
-            img_np = image.permute(1,2,0).cpu().numpy()
-            plt.subplot(1, num_images, i+1)
-            plt.imshow(img_np)
-            plt.title(str(i))
-
-        plt.savefig("zoom_plots.pdf")
-        plt.close()
-        print("Plot saved")
 
     def forward(self, images, queries, queries_mask):
         """ The forward expects a NestedTensor, which consists of:
@@ -110,26 +75,8 @@ class DETR(nn.Module):
         else:
             decoder_embed = self.query_embed(queries)
 
-        # get zoom_features
-        print("Queries:")
-        print(queries.cpu())
-        zoom_coords = self.zoom_embed(decoder_embed).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
-        zoom_coords[..., 0] *= images.size(3)
-        zoom_coords[..., 1] *= images.size(2)
-        zoom_coords[..., 2] *= images.size(3)
-        zoom_coords[..., 3] *= images.size(2)
-        print("Zoom_coords:")
-        print(zoom_coords.cpu())
-        zoom_features = self.get_zoom_features(images, zoom_coords, queries_mask)   # [N, seq_len (num_q), 3, h_resize, w_resize]
 
-        self.plot_zoom_features(zoom_features)
-
-        # pass zoom features through backbone
-        zoom_features = self.backbone_zoom(zoom_features.flatten(start_dim=0, end_dim=1))   #[NxSeq_len (num_q), 3, h_resize, w_resize] -> [NxSeq_len, hidden, h_resize/4, w_resize/4]
-        zoom_pos_encode = pos_encode_zoom(fmap_shape=(zoom_coords.size(0), zoom_coords.size(1), *zoom_features.size()[1:]), 
-                                          zoom_coords=zoom_coords, img=images)  # [N, Seq_len, hidden, h_resize/4, w_resize/4]
-
-        hs = self.transformer(encoder_embed, decoder_embed, pos, zoom_features, zoom_pos_encode, queries_mask) # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
+        hs = self.transformer(features, encoder_embed, decoder_embed, pos, queries_mask) # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
 
         outputs_objectness = self.objectness_embed(hs).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
         outputs_coord = self.bbox_embed(hs).sigmoid() # [Num_Decoding, N, Seq_len, 4]
