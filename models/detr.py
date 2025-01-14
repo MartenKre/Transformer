@@ -76,7 +76,7 @@ class DETR(nn.Module):
             decoder_embed = self.query_embed(queries)
 
 
-        hs = self.transformer(features, encoder_embed, decoder_embed, pos, queries_mask) # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
+        hs = self.transformer(images, encoder_embed, decoder_embed, pos, queries_mask) # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
 
         outputs_objectness = self.objectness_embed(hs).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
         outputs_coord = self.bbox_embed(hs).sigmoid() # [Num_Decoding, N, Seq_len, 4]

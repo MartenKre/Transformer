@@ -41,17 +41,9 @@ def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
     return model
 
 
-def init_backbone_zoom(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
-    # masks are only used for image segmentation
-
-    train_backbone = lr_backbone > 0
-    return_interm_layers = False
-    backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
-    return model
-
-
-def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm):
+def init_transformer(backbone_zoom, hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm):
     return Transformer(
+        backbone_zoom=backbone_zoom,
         d_model=hidden_dim,
         dropout=dropout,
         nhead=nheads,
@@ -144,7 +136,7 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "run1_zoom/best.pth"
+path_to_weights = "run_zoom2/best.pth"
 
 path_to_img = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/test/images/00106.png"
 path_to_queries = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/test/queries/00106.txt"
@@ -167,10 +159,9 @@ use_embeddings = False
 # Init Model
 backbone = init_backbone(1e-5, hidden_dim)
 backbone_zoom = BackboneZoom(name='resnet50', train_backbone=1e-5)
-transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm)
+transformer = init_transformer(backbone_zoom, hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm)
 model = DETR(
     backbone,
-    backbone_zoom,
     transformer,
     input_dim_gt=2,
     aux_loss=False,

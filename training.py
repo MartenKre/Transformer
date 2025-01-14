@@ -32,16 +32,10 @@ def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
     model.num_channels = backbone.num_channels
     return model
 
-def init_backbone_zoom(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
-    # masks are only used for image segmentation
 
-    train_backbone = lr_backbone > 0
-    return_interm_layers = False
-    backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
-    return model
-
-def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm):
+def init_transformer(backbone_zoom, hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm):
     return Transformer(
+        backbone_zoom=backbone_zoom,
         d_model=hidden_dim,
         dropout=dropout,
         nhead=nheads,
@@ -175,7 +169,7 @@ lr_backbone = 1e-5
 hidden_dim = 256    # embedding dim
 enc_layers = 6      # encoding layers
 enc_zoom_layers = 4 # encoding layers
-dec_layers = 6      # decoding layers
+dec_layers = 3      # decoding layers
 dim_feedforward = 2048  # dim of ff layers in transformer layers
 dropout = 0.1
 nheads = 8          # transformear heads
@@ -216,10 +210,9 @@ if distributed:
 # Init Model
 backbone = init_backbone(lr_backbone, hidden_dim)
 backbone_zoom = BackboneZoom(name='resnet50', train_backbone=True if lr_backbone > 0 else False)
-transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm)
+transformer = init_transformer(backbone_zoom, hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm)
 model = DETR(
     backbone,
-    backbone_zoom,
     transformer,
     input_dim_gt=2,
     aux_loss=aux_loss,

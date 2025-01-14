@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch import device, nn, Tensor
-from detr import MLP
 from models.position_encoding import pos_encode_zoom
 
 
@@ -59,7 +58,9 @@ class Transformer(nn.Module):
 
         # used for determining buoy BBs 
         self.visible_embed = nn.Linear(d_model, 1)
-        self.zoom_embed = MLP(d_model, d_model, 4)
+        self.z1 = nn.Linear(d_model, d_model)
+        self.rel1 = nn.ReLU()
+        self.z2 = nn.Linear(d_model, 4)
 
         self._reset_parameters()
 
@@ -68,7 +69,7 @@ class Transformer(nn.Module):
 
     def get_zoom_features(self, img, zoom_coords, visible, query_mask, size=[50, 50]):   # img:[N, 3, H, W]
         # size: size in px (height, width) of 
-        num_z = torch.max((visible>0.5 & query_mask).sum(dim=1))
+        num_z = torch.max(((visible>0.5) & query_mask).sum(dim=1))
         mask = torch.zeros((img.size(0), num_z), dtype=torch.bool, device=query_mask.device) # [N, num_z]
         fmaps = torch.zeros((img.size(0), num_z, 3, size[0], size[1]), device=img.device)    # [N, seq_len, 3, h_resize, w_resize]
         filtered_coords = torch.zeros((img.size(0), num_z, zoom_coords.size(-1)), device=fmaps.device) # [N, num_z, 4]
@@ -80,14 +81,14 @@ class Transformer(nn.Module):
         x1[x1 < 0] = 0
         x2 = torch.round(zoom_coords[:, :, 0] + zoom_coords[:, :, 2]/2).int()
         x2[x2 > img.size(3)] = img.size(3)
-        for b in range(0, img.size(0)):
+        for b in range(0, img.size(0)): # batch size
             i = 0
-            for s in range(0, zoom_coords.size(1)):
+            for s in range(0, zoom_coords.size(1)): # num_q
                 if query_mask[b, s] and visible[b, s] > 0.5:
                     extracted = img[b, :, y1[b,s]:y2[b,s], x1[b,s]:x2[b,s]].unsqueeze(0)
                     fmaps[b,i,:,:,:] = nn.functional.interpolate(extracted, size=(size[0], size[1]), mode='bilinear').squeeze(0)
                     mask[b,i] = True
-                    filtered_coords[b, i, :] = torch.tensor([y1, y2, x1, x2], device=fmaps.device)
+                    filtered_coords[b, i, :] = torch.tensor([y1[b,s], y2[b,s], x1[b,s], x2[b,s]], device=fmaps.device)
                     i += 1
         return fmaps, mask, filtered_coords
 
@@ -117,21 +118,27 @@ class Transformer(nn.Module):
 
         # run first part of transformer
         memory = self.encoder(src, pos=pos_embed)
-        hs = self.decoder(query_embed, memory, pos=pos_embed, tgt_key_padding_mask=query_mask)
+        hs = self.decoder(query_embed, memory, pos=pos_embed, tgt_key_padding_mask=query_mask).squeeze(0)
 
 
         # extract zoom coords based on transformer output
-        zoom_coords = self.zoom_embed(hs.permute(1,0,2)).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
+        zoom_coords = self.z2(self.rel1(self.z1(hs.permute(1,0,2)))).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
         visible = self.visible_embed(hs.permute(1,0,2)).sigmoid().squeeze(-1)   # [N, Seq_len (num_q)]
+        
+
         zoom_coords[..., 0] *= images.size(3)
         zoom_coords[..., 1] *= images.size(2)
         zoom_coords[..., 2] *= images.size(3)
         zoom_coords[..., 3] *= images.size(2)
+        print()
+        print(zoom_coords)
+        print(visible)
         zoom_features, zoom_mask, filtered_coords = self.get_zoom_features(images,
                                                                            zoom_coords,
                                                                            visible, 
                                                                            query_mask)   # [N, seq_len (num_z), 3, h_resize, w_resize], [N, seq_len (num_z)]
-        #self.plot_zoom_features(zoom_features)
+
+        self.plot_zoom_features(zoom_features)
         # pass zoom features through backbone
         zoom_features = self.backbone_zoom(zoom_features.flatten(start_dim=0, end_dim=1))   #[NxSeq_len, 3, h_resize, w_resize] -> [NxSeq_len, hidden, h_resize/4, w_resize/4]
         zoom_pos_encode = pos_encode_zoom(fmap_shape=(zoom_mask.size(0), zoom_mask.size(1), *zoom_features.size()[1:]), 
@@ -140,8 +147,7 @@ class Transformer(nn.Module):
         zoom_embed = zoom_features.flatten(2).permute(2, 0, 1)   # [h_z*w_z, n*seq_len, hidden]
         n, seq_len, hidden, h_z, w_z = zoom_pos_encode.shape 
         zoom_pos_embed1 = zoom_pos_encode.flatten(0,1).flatten(2).permute(2, 0, 1) # [h_z*w_z, n*seq_len, hidden]
-        zoom_mask = zoom_mask.unsqueeze(-1).unsqueeze(.1).expand(-1, -1, h_z, w_z).flatten(1) #[n, seq_len, h_z, w_z] -> [n, seq_len*h_w*w_z]
-        # ----
+        zoom_mask = zoom_mask.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, h_z, w_z).flatten(1) #[n, seq_len, h_z, w_z] -> [n, seq_len*h_w*w_z]
         
 
         # run second part of transformer with zoom features
@@ -153,7 +159,7 @@ class Transformer(nn.Module):
         memory_mask = torch.ones(size=(memory.size(1), memory.size(0)), dtype=torch.bool, device=memory.device)
         memory_mask[:, h*w:] = zoom_mask # [n, h*w+seq_len*h*w]
         memory_mask = ~memory_mask
-        hs = self.decoder2(query_embed, memory, pos=pos_embed, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=query_mask)
+        hs = self.decoder2(hs, memory, pos=pos_embed, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=query_mask)
         return hs.transpose(1,2)
 
 
