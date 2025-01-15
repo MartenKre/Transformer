@@ -33,8 +33,6 @@ class DETR(nn.Module):
         super().__init__()
         self.transformer = transformer
         hidden_dim = transformer.d_model
-        self.objectness_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
-        self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
 
         if not use_embeddings:
             self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
@@ -75,15 +73,12 @@ class DETR(nn.Module):
         else:
             decoder_embed = self.query_embed(queries)
 
-
-        hs = self.transformer(images, encoder_embed, decoder_embed, pos, queries_mask) # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
-
-        outputs_objectness = self.objectness_embed(hs).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
-        outputs_coord = self.bbox_embed(hs).sigmoid() # [Num_Decoding, N, Seq_len, 4]
+        outputs_objectness, outputs_coord = self.transformer(images, encoder_embed, decoder_embed, pos, queries_mask) # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
 
         out = {'pred_logits': outputs_objectness[-1], 'pred_boxes': outputs_coord[-1]}
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_objectness, outputs_coord)
+
         return out
 
     @torch.jit.unused

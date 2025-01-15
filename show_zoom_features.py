@@ -136,7 +136,7 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "run_zoom2/best.pth"
+path_to_weights = "test/best.pth"
 
 path_to_img = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/test/images/00106.png"
 path_to_queries = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/test/queries/00106.txt"
@@ -148,7 +148,7 @@ resize_coeffs = [0.5, 0.5] # applied to image before inference, 0 -> x, 1 -> y
 hidden_dim = 256    # embedding dim
 enc_layers = 6      # encoding layers
 enc_zoom_layers = 4
-dec_layers = 6      # decoding layers
+dec_layers = 5      # decoding layers
 dim_feedforward = 2048  # dim of ff layers in transformer layers
 dropout = 0.1
 nheads = 8          # transformear heads

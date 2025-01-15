@@ -17,6 +17,20 @@ from torch import device, nn, Tensor
 from models.position_encoding import pos_encode_zoom
 
 
+class MLP(nn.Module):
+    """ Very simple multi-layer perceptron (also called FFN)"""
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        h = [hidden_dim] * (num_layers - 1)
+        self.layers = nn.ModuleList(nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
+
 class Transformer(nn.Module):
 
     def __init__(self, backbone_zoom, d_model=512, nhead=8, num_encoder_layers=6, num_encoder_zoom_layers = 4,
@@ -56,11 +70,9 @@ class Transformer(nn.Module):
         self.decoder2 = TransformerDecoder(decoder_layer2, num_decoder_layers, decoder_norm2,
                                           return_intermediate=return_intermediate_dec)
 
-        # used for determining buoy BBs 
-        self.visible_embed = nn.Linear(d_model, 1)
-        self.z1 = nn.Linear(d_model, d_model)
-        self.rel1 = nn.ReLU()
-        self.z2 = nn.Linear(d_model, 4)
+        # Output Embeddings to final Predictions
+        self.objectness_embed = nn.Linear(d_model, 1) # only one output class -> objectness
+        self.bbox_embed = MLP(d_model, d_model, 4, 3)
 
         self._reset_parameters()
 
@@ -122,23 +134,23 @@ class Transformer(nn.Module):
 
 
         # extract zoom coords based on transformer output
-        zoom_coords = self.z2(self.rel1(self.z1(hs.permute(1,0,2)))).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
-        visible = self.visible_embed(hs.permute(1,0,2)).sigmoid().squeeze(-1)   # [N, Seq_len (num_q)]
+        zoom_coords_preds = self.bbox_embed(hs.permute(1,0,2)).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
+        visible = self.objectness_embed(hs.permute(1,0,2)).sigmoid().squeeze(-1)   # [N, Seq_len (num_q)]
         
-
+        zoom_coords = zoom_coords_preds.clone()
         zoom_coords[..., 0] *= images.size(3)
         zoom_coords[..., 1] *= images.size(2)
         zoom_coords[..., 2] *= images.size(3)
         zoom_coords[..., 3] *= images.size(2)
-        print()
-        print(zoom_coords)
-        print(visible)
         zoom_features, zoom_mask, filtered_coords = self.get_zoom_features(images,
                                                                            zoom_coords,
                                                                            visible, 
                                                                            query_mask)   # [N, seq_len (num_z), 3, h_resize, w_resize], [N, seq_len (num_z)]
-
-        self.plot_zoom_features(zoom_features)
+        # print()
+        # print(visible)
+        # print(zoom_coords)
+        # self.plot_zoom_features(zoom_features)
+        
         # pass zoom features through backbone
         zoom_features = self.backbone_zoom(zoom_features.flatten(start_dim=0, end_dim=1))   #[NxSeq_len, 3, h_resize, w_resize] -> [NxSeq_len, hidden, h_resize/4, w_resize/4]
         zoom_pos_encode = pos_encode_zoom(fmap_shape=(zoom_mask.size(0), zoom_mask.size(1), *zoom_features.size()[1:]), 
@@ -160,7 +172,13 @@ class Transformer(nn.Module):
         memory_mask[:, h*w:] = zoom_mask # [n, h*w+seq_len*h*w]
         memory_mask = ~memory_mask
         hs = self.decoder2(hs, memory, pos=pos_embed, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=query_mask)
-        return hs.transpose(1,2)
+        hs = hs.transpose(1,2)
+        outputs_objectness = self.objectness_embed(hs).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
+        outputs_coord = self.bbox_embed(hs).sigmoid() # [Num_Decoding, N, Seq_len, 4]
+
+        outputs_coord = torch.cat((zoom_coords_preds.unsqueeze(0), outputs_coord))
+        outputs_objectness = torch.cat((visible.unsqueeze(0), outputs_objectness))
+        return outputs_objectness, outputs_coord
 
 
 class TransformerEncoder(nn.Module):
