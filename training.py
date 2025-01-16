@@ -191,8 +191,8 @@ bbox_loss_coef = 2
 giou_loss_coef = 5
 
 # Optimizer / DataLoader
-lr = 2e-4
-batch_size=2
+lr = 1e-4
+batch_size=4
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3

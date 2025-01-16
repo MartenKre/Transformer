@@ -202,20 +202,23 @@ class BasicLogger():
         for c_t in conf_threshs:
             c_t = round(c_t, 3)
             if c_t not in self.stats_dict[mode]['mAP'][iou_thresh]:
-                self.stats_dict[mode]['mAP'][iou_thresh][c_t] = {'tp': 0, 'fp': 0}
+                self.stats_dict[mode]['mAP'][iou_thresh][c_t] = {'tp': 0, 'fp': 0, 'fn': 0}
 
             src_logits = outputs['pred_logits'].cpu().detach()     # only get logits, that have corresponding label
             conf_mask = torch.full(src_logits.shape, fill_value=False)
             conf_mask[src_logits>=c_t] = True       # mask for conf logits that are greater than thresh
             bb_filtered = outputs['pred_boxes'][conf_mask & labels_mask].cpu().detach()
             labels_filtered = labels[conf_mask & labels_mask][...,1:]
-            fp_conf = src_logits[~conf_mask & labels_mask].numel()  # fp through conf: has corresp label but is below conf level
+            fp_conf = src_logits[conf_mask & ~labels_mask & queries_mask].numel()
+            fn_conf = src_logits[~conf_mask & labels_mask].numel()  # fp through conf: has corresp label but is below conf level
             res = self.computeIOU(bb_filtered, labels_filtered)
 
             fp_iou = res[res<iou_thresh].numel()
+            fn_iou = fp_iou
             tp = res.numel() - fp_iou
             self.stats_dict[mode]['mAP'][iou_thresh][c_t]['tp'] += tp
             self.stats_dict[mode]['mAP'][iou_thresh][c_t]['fp'] += (fp_iou + fp_conf)
+            self.stats_dict[mode]['mAP'][iou_thresh][c_t]['fn'] += (fn_iou + fn_conf)
 
     def compute_mAP50_95(self, outputs, labels, queries_mask, labels_mask, mode='val'):
         threshs = np.arange(start=0.5, stop=1, step=0.05)
@@ -259,35 +262,42 @@ class BasicLogger():
         self.stats_dict = {}
 
     def print_mAP50(self, mode="val"):
-        result = []
+        pr_curve = []
         target_dict = self.stats_dict[mode]['mAP'][0.5]
         for ct in target_dict:
             tp = target_dict[ct]['tp']
             fp = target_dict[ct]['fp']
+            fn = target_dict[ct]['fn']
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-            result.append(precision)
-        result = round(sum(result)/len(result), 4)
-        print("mAP@50: ", result)
-        self.stats_output['mAP@50'] = result
-        return result 
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            pr_curve.append((precision, recall))
+        pr_curve = sorted(pr_curve, key=lambda x: x[1])
+        area = sum([x[1]-pr_curve[i-1][1]*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
+        ap_50 = round(area, 4)
+        print("mAP@50: ", ap_50)
+        self.stats_output['mAP@50'] = ap_50
+        return ap_50 
 
     def print_mAP50_95(self, mode="val"):
         result = []
         threshs = np.arange(0.5, 1, 0.05)
         for i in threshs:
-            inter = []
+            pr_curve = []
             target_dict = self.stats_dict[mode]['mAP'][i]
             for ct in target_dict:
                 tp = target_dict[ct]['tp']
                 fp = target_dict[ct]['fp']
+                fn = target_dict[ct]['fn']
                 precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-                inter.append(precision)
-            map_i = sum(inter)/len(inter)
-            result.append(map_i)
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+                pr_curve.append((precision, recall))
+            pr_curve = sorted(pr_curve, key=lambda x: x[1])
+            ap_i = sum([x[1]-pr_curve[i-1][1]*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
+            result.append(ap_i)
         result = round(sum(result)/len(result), 4)
         print("mAP@[.5:.95]: ", result)
         self.stats_output['mAP@[.5:.95]'] = result
-        return result 
+        return result
 
     def printCF(self, thresh=0.5, mode='val'):
         t_idx = np.argmin(np.abs(np.array([t for t in self.stats_dict[mode]['PR']]) - thresh))
