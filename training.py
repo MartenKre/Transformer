@@ -47,7 +47,6 @@ def init_transformer(backbone_zoom, hidden_dim, dropout, nheads, dim_feedforward
         return_intermediate_dec=True,
     )
 
-
 def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm=0.1, logger=None):
     model.train()
     criterion.train()
@@ -88,6 +87,11 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
 
             optimizer.zero_grad()
             losses.backward()
+            
+            # print()
+            # print(torch.max(model.transformer.zoom_coords_embed.layers[0].weight.grad))
+            # print(torch.max(model.transformer.encoder_zoom.layers[0].linear1.weight.grad))
+            # print(torch.max(model.transformer.backbone_zoom.body.conv1.weight.grad))
 
             if max_norm > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
@@ -169,7 +173,7 @@ lr_backbone = 1e-5
 hidden_dim = 256    # embedding dim
 enc_layers = 6      # encoding layers
 enc_zoom_layers = 4 # encoding layers
-dec_layers = 5      # decoding layers
+dec_layers = 3      # decoding layers
 dim_feedforward = 2048  # dim of ff layers in transformer layers
 dropout = 0.1
 nheads = 8          # transformear heads
@@ -199,8 +203,8 @@ batch_size=2
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
-epochs=80
-lr_drop=200
+epochs=120
+lr_drop=75
 clip_max_norm=0.0
 num_workers = 4
 if distributed:
@@ -235,7 +239,7 @@ weight_dict = {'loss_bce': bce_loss_coef, 'loss_bbox': bbox_loss_coef}
 weight_dict['loss_giou'] = giou_loss_coef
 if aux_loss:
     aux_weight_dict = {}
-    for i in range(dec_layers):
+    for i in range(dec_layers*2):
         aux_weight_dict.update({k + f'_{i}': v for k, v in weight_dict.items()})
     weight_dict.update(aux_weight_dict)
 losses = ['labels', 'boxes']

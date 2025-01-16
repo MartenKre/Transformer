@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 import torch
 import torch.nn.functional as F
-from torch import device, nn, Tensor
+from torch import Value, device, nn, Tensor
 from models.position_encoding import pos_encode_zoom
 
 
@@ -60,7 +60,7 @@ class Transformer(nn.Module):
                                                 dropout, activation, normalize_before)
         decoder_norm = nn.LayerNorm(d_model)
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
-                                          return_intermediate=False)
+                                          return_intermediate=return_intermediate_dec)
 
 
         # decoder 2
@@ -70,6 +70,7 @@ class Transformer(nn.Module):
         self.decoder2 = TransformerDecoder(decoder_layer2, num_decoder_layers, decoder_norm2,
                                           return_intermediate=return_intermediate_dec)
 
+        self.zoom_coords_embed = MLP(d_model, d_model, 4, 3)
         # Output Embeddings to final Predictions
         self.objectness_embed = nn.Linear(d_model, 1) # only one output class -> objectness
         self.bbox_embed = MLP(d_model, d_model, 4, 3)
@@ -79,29 +80,48 @@ class Transformer(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
 
-    def get_zoom_features(self, img, zoom_coords, visible, query_mask, size=[50, 50]):   # img:[N, 3, H, W]
+    def get_zoom_features(self, img, zoom_coords, query_mask, size=[50, 50]):   # img:[N, 3, H, W]
         # size: size in px (height, width) of 
-        num_z = torch.max(((visible>0.5) & query_mask).sum(dim=1))
+        # num_z = torch.max(((visible>0.5) & query_mask).sum(dim=1))
+        num_z = query_mask.size(1)
         mask = torch.zeros((img.size(0), num_z), dtype=torch.bool, device=query_mask.device) # [N, num_z]
         fmaps = torch.zeros((img.size(0), num_z, 3, size[0], size[1]), device=img.device)    # [N, seq_len, 3, h_resize, w_resize]
         filtered_coords = torch.zeros((img.size(0), num_z, zoom_coords.size(-1)), device=fmaps.device) # [N, num_z, 4]
-        y1 = torch.round(zoom_coords[:, :, 1] - zoom_coords[:, :, 3]/2).int()
-        y1[y1 < 0] = 0
-        y2 = torch.round(zoom_coords[:, :, 1] + zoom_coords[:, :, 3]/2).int()
-        y2[y2 > img.size(2)] = img.size(2)
-        x1 = torch.round(zoom_coords[:, :, 0] - zoom_coords[:, :, 2]/2).int()
-        x1[x1 < 0] = 0
-        x2 = torch.round(zoom_coords[:, :, 0] + zoom_coords[:, :, 2]/2).int()
-        x2[x2 > img.size(3)] = img.size(3)
+
+        y1 = zoom_coords[:, :, 1] - zoom_coords[:, :, 3]/2
+        y1 = y1.clamp(min=0)
+        y2 = zoom_coords[:, :, 1] + zoom_coords[:, :, 3]/2
+        y2 = y2.clamp(max=1)
+        x1 = zoom_coords[:, :, 0] - zoom_coords[:, :, 2]/2
+        x1 = x1.clamp(min=0)
+        x2 = zoom_coords[:, :, 0] + zoom_coords[:, :, 2]/2
+        x2 = x2.clamp(max=1)
+        
+        tensor_list = []
+
         for b in range(0, img.size(0)): # batch size
             i = 0
             for s in range(0, zoom_coords.size(1)): # num_q
-                if query_mask[b, s] and visible[b, s] > 0.5:
-                    extracted = img[b, :, y1[b,s]:y2[b,s], x1[b,s]:x2[b,s]].unsqueeze(0)
-                    fmaps[b,i,:,:,:] = nn.functional.interpolate(extracted, size=(size[0], size[1]), mode='bilinear').squeeze(0)
+                # if query_mask[b, s] and visible[b, s] > 0.5:
+                    image = img[b].unsqueeze(0)
+                    # normalize coords
+                    norm_x1 = 2 * x1[b,s] -1
+                    norm_x2 = 2 * x2[b,s] -1
+                    norm_y1 = 2 * y1[b,s] -1
+                    norm_y2 = 2 * y2[b,s] -1
+                    # create grid
+                    grid_x = torch.linspace(0, 1, size[1], device=img.device) * (norm_x2 - norm_x1) + norm_x1
+                    grid_y = torch.linspace(0, 1, size[0], device=img.device) * (norm_y2 - norm_y1) + norm_y1
+                    grid_x, grid_y = torch.meshgrid(grid_x, grid_y)
+                    grid = torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0)  # (1, output_h, output_w, 2)
+                    # compute roi
+                    roi = F.grid_sample(image, grid, mode='bilinear', align_corners=True)
+                    fmaps[b,i,:,:,:] = roi.squeeze(0)
+                    tensor_list.append(roi.squeeze(0))
                     mask[b,i] = True
                     filtered_coords[b, i, :] = torch.tensor([y1[b,s], y2[b,s], x1[b,s], x2[b,s]], device=fmaps.device)
                     i += 1
+        # result = torch.stack(tensor_list, dim=0).view(query_mask.size(0), query_mask.size(1), 3, size[0], size[1])
         return fmaps, mask, filtered_coords
 
     def plot_zoom_features(self, zoom_features):
@@ -130,54 +150,46 @@ class Transformer(nn.Module):
 
         # run first part of transformer
         memory = self.encoder(src, pos=pos_embed)
-        hs = self.decoder(query_embed, memory, pos=pos_embed, tgt_key_padding_mask=query_mask).squeeze(0)
+        hs = self.decoder(query_embed, memory, pos=pos_embed, tgt_key_padding_mask=query_mask)
 
 
         # extract zoom coords based on transformer output
-        zoom_coords_preds = self.bbox_embed(hs.permute(1,0,2)).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
-        visible = self.objectness_embed(hs.permute(1,0,2)).sigmoid().squeeze(-1)   # [N, Seq_len (num_q)]
-        
-        zoom_coords = zoom_coords_preds.clone()
-        zoom_coords[..., 0] *= images.size(3)
-        zoom_coords[..., 1] *= images.size(2)
-        zoom_coords[..., 2] *= images.size(3)
-        zoom_coords[..., 3] *= images.size(2)
-        zoom_features, zoom_mask, filtered_coords = self.get_zoom_features(images,
-                                                                           zoom_coords,
-                                                                           visible, 
-                                                                           query_mask)   # [N, seq_len (num_z), 3, h_resize, w_resize], [N, seq_len (num_z)]
+        # zoom_coords_preds = self.zoom_coords_embed(hs[-1].permute(1,0,2)).sigmoid()  # [N, Seq_len (num_q), 4], 4 = [x,y,w,h]
+        #
+        # zoom_features, zoom_mask, filtered_coords = self.get_zoom_features(images,
+                                                                           # zoom_coords_preds,
+                                                                           # query_mask)   # [N, seq_len (num_z), 3, h_resize, w_resize], [N, seq_len (num_z)]
         # print()
         # print(visible)
         # print(zoom_coords)
         # self.plot_zoom_features(zoom_features)
         
         # pass zoom features through backbone
-        zoom_features = self.backbone_zoom(zoom_features.flatten(start_dim=0, end_dim=1))   #[NxSeq_len, 3, h_resize, w_resize] -> [NxSeq_len, hidden, h_resize/4, w_resize/4]
-        zoom_pos_encode = pos_encode_zoom(fmap_shape=(zoom_mask.size(0), zoom_mask.size(1), *zoom_features.size()[1:]), 
-                                          zoom_coords=filtered_coords)  # [N, Seq_len, hidden, h_resize/4, w_resize/4]
-
-        zoom_embed = zoom_features.flatten(2).permute(2, 0, 1)   # [h_z*w_z, n*seq_len, hidden]
-        n, seq_len, hidden, h_z, w_z = zoom_pos_encode.shape 
-        zoom_pos_embed1 = zoom_pos_encode.flatten(0,1).flatten(2).permute(2, 0, 1) # [h_z*w_z, n*seq_len, hidden]
-        zoom_mask = zoom_mask.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, h_z, w_z).flatten(1) #[n, seq_len, h_z, w_z] -> [n, seq_len*h_w*w_z]
+        # zoom_features = self.backbone_zoom(zoom_features.flatten(start_dim=0, end_dim=1))   #[NxSeq_len, 3, h_resize, w_resize] -> [NxSeq_len, hidden, h_resize/4, w_resize/4]
+        # zoom_pos_encode = pos_encode_zoom(fmap_shape=(zoom_mask.size(0), zoom_mask.size(1), *zoom_features.size()[1:]), 
+        #                                   zoom_coords=filtered_coords)  # [N, Seq_len, hidden, h_resize/4, w_resize/4]
+        #
+        # zoom_embed = zoom_features.flatten(2).permute(2, 0, 1)   # [h_z*w_z, n*seq_len, hidden]
+        # n, seq_len, hidden, h_z, w_z = zoom_pos_encode.shape 
+        # zoom_pos_embed1 = zoom_pos_encode.flatten(0,1).flatten(2).permute(2, 0, 1) # [h_z*w_z, n*seq_len, hidden]
+        # zoom_mask = zoom_mask.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, h_z, w_z).flatten(1) #[n, seq_len, h_z, w_z] -> [n, seq_len*h_w*w_z]
         
 
         # run second part of transformer with zoom features
-        memory2 = self.encoder_zoom(zoom_embed, pos=zoom_pos_embed1)  # encoder for zoom features
-        memory2 = memory2.view(h_z*w_z, n, seq_len, hidden).permute(2, 0, 1, 3).flatten(0, 1) # [seq_len*h_z*w_z, n, hidden]
-        memory = torch.cat((memory, memory2)) # [h*w + h_z*w_z*seq_len, n, hidden]
-        zoom_pos_embed2 = zoom_pos_encode.flatten(3).permute(1, 3, 0, 2).flatten(0, 1)    # [seq_len*h_z*w_z, n, hidden]
-        pos_embed = torch.cat((pos_embed, zoom_pos_embed2))
-        memory_mask = torch.ones(size=(memory.size(1), memory.size(0)), dtype=torch.bool, device=memory.device)
-        memory_mask[:, h*w:] = zoom_mask # [n, h*w+seq_len*h*w]
-        memory_mask = ~memory_mask
-        hs = self.decoder2(hs, memory, pos=pos_embed, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=query_mask)
-        hs = hs.transpose(1,2)
-        outputs_objectness = self.objectness_embed(hs).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
-        outputs_coord = self.bbox_embed(hs).sigmoid() # [Num_Decoding, N, Seq_len, 4]
+        # memory2 = self.encoder_zoom(zoom_embed, pos=zoom_pos_embed1)  # encoder for zoom features
+        # memory2 = memory2.view(h_z*w_z, n, seq_len, hidden).permute(2, 0, 1, 3).flatten(0, 1) # [seq_len*h_z*w_z, n, hidden]
+        # memory = torch.cat((memory, memory2)) # [h*w + h_z*w_z*seq_len, n, hidden]
+        # zoom_pos_embed2 = zoom_pos_encode.flatten(3).permute(1, 3, 0, 2).flatten(0, 1)    # [seq_len*h_z*w_z, n, hidden]
+        # pos_embed = torch.cat((pos_embed, zoom_pos_embed2))
+        # memory_mask = torch.ones(size=(memory.size(1), memory.size(0)), dtype=torch.bool, device=memory.device)
+        # memory_mask[:, h*w:] = zoom_mask # [n, h*w+seq_len*h*w]
+        # memory_mask = ~memory_mask
+        # hs2 = self.decoder2(hs[-1], memory, pos=pos_embed, memory_key_padding_mask=memory_mask, tgt_key_padding_mask=query_mask)
+        hs2 = self.decoder2(hs[-1], memory, pos=pos_embed, tgt_key_padding_mask=query_mask)
+        out = torch.cat((hs, hs2)).transpose(1,2)
+        outputs_objectness = self.objectness_embed(out).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
+        outputs_coord = self.bbox_embed(out).sigmoid() # [Num_Decoding, N, Seq_len, 4]
 
-        outputs_coord = torch.cat((zoom_coords_preds.unsqueeze(0), outputs_coord))
-        outputs_objectness = torch.cat((visible.unsqueeze(0), outputs_objectness))
         return outputs_objectness, outputs_coord
 
 
