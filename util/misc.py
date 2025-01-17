@@ -263,6 +263,7 @@ class BasicLogger():
 
     def print_mAP50(self, mode="val"):
         pr_curve = []
+        precision_list = []
         target_dict = self.stats_dict[mode]['mAP'][0.5]
         for ct in target_dict:
             tp = target_dict[ct]['tp']
@@ -271,12 +272,14 @@ class BasicLogger():
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0
             pr_curve.append((precision, recall))
+            precision_list.append(precision)
         pr_curve = sorted(pr_curve, key=lambda x: x[1])
-        area = sum([x[1]-pr_curve[i-1][1]*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
+        area = sum([(x[1]-pr_curve[i-1][1])*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
         ap_50 = round(area, 4)
-        print("mAP@50: ", ap_50)
-        self.stats_output['mAP@50'] = ap_50
-        return ap_50 
+        result = round(sum(precision_list) / len(precision_list), 4)
+        print("mAP@50: ", result)
+        self.stats_output['mAP@50'] = result
+        return result
 
     def print_mAP50_95(self, mode="val"):
         result = []
@@ -292,7 +295,7 @@ class BasicLogger():
                 recall = tp / (tp + fn) if (tp + fn) > 0 else 0
                 pr_curve.append((precision, recall))
             pr_curve = sorted(pr_curve, key=lambda x: x[1])
-            ap_i = sum([x[1]-pr_curve[i-1][1]*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
+            ap_i = sum([(x[1]-pr_curve[i-1][1])*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
             result.append(ap_i)
         result = round(sum(result)/len(result), 4)
         print("mAP@[.5:.95]: ", result)
