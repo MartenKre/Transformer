@@ -151,8 +151,8 @@ class Transformer(nn.Module):
                                                                            zoom_coords_preds,
                                                                            query_mask)   # [N, seq_len (num_z), 3, h_resize, w_resize], [N, seq_len (num_z)]
         # print()
-        # print(visible)
-        # print(zoom_coords)
+        # print(zoom_mask)
+        # print(filtered_coords)
         # self.plot_zoom_features(zoom_features)
         
         # pass zoom features through backbone

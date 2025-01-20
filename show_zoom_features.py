@@ -41,15 +41,13 @@ def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
     return model
 
 
-def init_transformer(backbone_zoom, hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm):
+def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
     return Transformer(
-        backbone_zoom=backbone_zoom,
         d_model=hidden_dim,
         dropout=dropout,
         nhead=nheads,
         dim_feedforward=dim_feedforward,
         num_encoder_layers=enc_layers,
-        num_encoder_zoom_layers=enc_zoom_layers,
         num_decoder_layers=dec_layers,
         normalize_before=pre_norm,
         return_intermediate_dec=True,
@@ -136,7 +134,7 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "test/best.pth"
+path_to_weights = "training_results/run2_zoom/best.pth"
 
 path_to_img = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/test/images/00106.png"
 path_to_queries = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/test/queries/00106.txt"
@@ -147,8 +145,7 @@ resize_coeffs = [0.5, 0.5] # applied to image before inference, 0 -> x, 1 -> y
 # Model settings:
 hidden_dim = 256    # embedding dim
 enc_layers = 6      # encoding layers
-enc_zoom_layers = 4
-dec_layers = 5      # decoding layers
+dec_layers = 6      # decoding layers
 dim_feedforward = 2048  # dim of ff layers in transformer layers
 dropout = 0.1
 nheads = 8          # transformear heads
@@ -158,8 +155,7 @@ use_embeddings = False
 
 # Init Model
 backbone = init_backbone(1e-5, hidden_dim)
-backbone_zoom = BackboneZoom(name='resnet50', train_backbone=1e-5)
-transformer = init_transformer(backbone_zoom, hidden_dim, dropout, nheads, dim_feedforward, enc_layers, enc_zoom_layers, dec_layers, pre_norm)
+transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm)
 model = DETR(
     backbone,
     transformer,
