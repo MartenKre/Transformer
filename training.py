@@ -7,9 +7,12 @@ from tqdm import tqdm
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader
-from models.detr import DETR, SetCriterion
-from models.transformer import Transformer
-from models.backbone import Backbone, Joiner
+# from models.detr import DETR, SetCriterion
+# from models.transformer import Transformer
+# from models.backbone import Backbone, Joiner
+from models.deformable_detr import DeformableDETR, SetCriterion
+from models.deformable_transformer import DeformableTransformer
+from models.deformable_backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
 from util.misc import save_on_master, BasicLogger
 
@@ -21,29 +24,29 @@ def init_position_encoding(hidden_dim):
     return position_embedding
 
 
-def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
+def init_backbone(lr_backbone, hidden_dim, num_feature_levels=4, backbone='resnet50', dilation=False):
     # masks are only used for image segmentation
-
     position_embedding = init_position_encoding(hidden_dim)
     train_backbone = lr_backbone > 0
-    return_interm_layers = False
+    return_interm_layers = (num_feature_levels > 1)
     backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
     model = Joiner(backbone, position_embedding)
-    model.num_channels = backbone.num_channels
     return model
 
 
-def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
-    return Transformer(
+def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, num_feature_levels, dec_n_points, enc_n_points):
+    return DeformableTransformer(
         d_model=hidden_dim,
-        dropout=dropout,
         nhead=nheads,
-        dim_feedforward=dim_feedforward,
         num_encoder_layers=enc_layers,
         num_decoder_layers=dec_layers,
-        normalize_before=pre_norm,
+        dim_feedforward=dim_feedforward,
+        dropout=dropout,
+        activation="relu",
         return_intermediate_dec=True,
-    )
+        num_feature_levels=num_feature_levels,
+        dec_n_points=dec_n_points,
+        enc_n_points=enc_n_points)
 
 
 def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm=0.1, logger=None):
@@ -173,6 +176,10 @@ nheads = 8          # transformear heads
 pre_norm = True     # apply norm pre or post tranformer layer
 input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
 use_embeddings = False
+num_feature_levels = 4
+dec_n_points = 4
+enc_n_points = 4
+with_box_refine = False
 
 # Multi GPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -186,9 +193,9 @@ if distributed:
 
 # Loss
 aux_loss = True
-bce_loss_coef = 1
-bbox_loss_coef = 2
-giou_loss_coef = 5
+bce_loss_coef = 2
+bbox_loss_coef = 5
+giou_loss_coef = 2
 
 # Optimizer / DataLoader
 lr = 1e-4
@@ -205,15 +212,15 @@ if distributed:
 
 
 # Init Model
-backbone = init_backbone(lr_backbone, hidden_dim)
-transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm)
-model = DETR(
+backbone = init_backbone(lr_backbone, hidden_dim, num_feature_levels)
+transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, num_feature_levels, dec_n_points, enc_n_points)
+model = DeformableDETR(
     backbone,
     transformer,
-    input_dim_gt=2,
+    input_dim_queries=2,
+    num_feature_levels=num_feature_levels,
     aux_loss=aux_loss,
-    use_embeddings=use_embeddings,
-)
+    with_box_refine=with_box_refine)
 model.to(device)
 
 model_without_ddp = model
