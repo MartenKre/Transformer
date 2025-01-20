@@ -31,8 +31,6 @@ class DETR(nn.Module):
         super().__init__()
         self.transformer = transformer
         hidden_dim = transformer.d_model
-        self.class_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
-        self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         if not use_embeddings:
             self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
         else:
@@ -42,6 +40,8 @@ class DETR(nn.Module):
         self.backbone = backbone
         self.aux_loss = aux_loss
         self.use_embeddings = use_embeddings
+        self.class_embed = nn.Linear(hidden_dim, 1) # only one output class -> objectness
+        self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
 
     def forward(self, images, queries, queries_mask):
         """ The forward expects a NestedTensor, which consists of:
@@ -70,10 +70,10 @@ class DETR(nn.Module):
         else:
             decoder_embed = self.query_embed(queries)
 
-        hs = self.transformer(encoder_embed, decoder_embed, pos, queries_mask)[0] # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
+        out = self.transformer(encoder_embed, decoder_embed, pos, queries_mask, images) # returns [Num_Decoding, Batch_SZ, Seq_len, hidden_dim]
 
-        outputs_objectness = self.class_embed(hs).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
-        outputs_coord = self.bbox_embed(hs).sigmoid() # [Num_Decoding, N, Seq_len, 4]
+        outputs_objectness = self.class_embed(out).sigmoid().squeeze(dim=-1) # [Num_Decoding, N, Seq_len]
+        outputs_coord = self.bbox_embed(out).sigmoid() # [Num_Decoding, N, Seq_len, 4]
 
         out = {'pred_logits': outputs_objectness[-1], 'pred_boxes': outputs_coord[-1]}
         if self.aux_loss:

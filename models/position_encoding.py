@@ -47,6 +47,32 @@ class PositionEmbeddingSine(nn.Module):
         return pos
 
 
+@torch.no_grad
+def pos_encode_zoom(fmap_shape, zoom_coords, temperature=10000):
+        b, n_z, hidden, h, w = fmap_shape
+        num_pos_feats = hidden // 2
+        result = torch.zeros(b, n_z, hidden, h, w, device=zoom_coords.device)
+        for b in range(0, b):
+            for i in range(0, n_z):
+                y1, y2, x1, x2 = zoom_coords[b,i]
+                y_embed = torch.linspace(y1, y2, h, dtype=torch.float32, device=zoom_coords.device)
+                y_embed = y_embed.repeat(w, 1).transpose(0,1)
+                x_embed = torch.linspace(x1, x2, w, dtype=torch.float32, device=zoom_coords.device)
+                x_embed = x_embed.repeat(h, 1)
+
+                dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=zoom_coords.device)
+                dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+
+                pos_x = x_embed[:, :, None] / dim_t
+                pos_y = y_embed[:, :, None] / dim_t
+                pos_x = torch.stack((pos_x[:, :, 0::2].sin(), pos_x[:, :, 1::2].cos()), dim=3).flatten(2)
+                pos_y = torch.stack((pos_y[:, :, 0::2].sin(), pos_y[:, :, 1::2].cos()), dim=3).flatten(2)
+                pos = torch.cat((pos_y, pos_x), dim=2).permute(2, 0, 1) # [hidden, h, w]
+                result[b, i, :, :, :] = pos
+
+        return result  # [b, seq_len, hidden, h, w]
+
+
 class PositionEmbeddingLearned(nn.Module):
     """
     Absolute pos embedding, learned.

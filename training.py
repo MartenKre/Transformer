@@ -196,8 +196,8 @@ batch_size=4
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
-epochs=80
-lr_drop=200
+epochs=120
+lr_drop=80
 clip_max_norm=0.0
 num_workers = 4
 if distributed:
