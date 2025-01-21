@@ -160,7 +160,7 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
 transfer_learning = True    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
-path_to_weights = r"detr-r50-e632da11.pth" 
+path_to_weights = r"r50_deformable_detr-checkpoint.pth" 
 output_dir = "test"
 
 # Backbone
@@ -170,7 +170,7 @@ lr_backbone = 1e-5
 hidden_dim = 256    # embedding dim
 enc_layers = 6      # encoding layers
 dec_layers = 6      # decoding layers
-dim_feedforward = 2048  # dim of ff layers in transformer layers
+dim_feedforward = 1024  # dim of ff layers in transformer layers
 dropout = 0.1
 nheads = 8          # transformear heads
 pre_norm = True     # apply norm pre or post tranformer layer
@@ -203,8 +203,8 @@ batch_size=4
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
-epochs=80
-lr_drop=200
+epochs=120
+lr_drop=80
 clip_max_norm=0.0
 num_workers = 4
 if distributed:
@@ -270,8 +270,18 @@ data_loader_val = DataLoader(dataset_val, batch_size, sampler=sampler_val, drop_
 if transfer_learning:
     print("loading weights..")
     checkpoint = torch.load(path_to_weights, map_location='cpu')
-    del checkpoint['model']['class_embed.weight']
-    del checkpoint['model']['class_embed.bias']
+    del checkpoint['model']['class_embed.0.weight']
+    del checkpoint['model']['class_embed.0.bias']
+    del checkpoint['model']['class_embed.1.weight']
+    del checkpoint['model']['class_embed.1.bias']
+    del checkpoint['model']['class_embed.2.weight']
+    del checkpoint['model']['class_embed.2.bias']
+    del checkpoint['model']['class_embed.3.weight']
+    del checkpoint['model']['class_embed.3.bias']
+    del checkpoint['model']['class_embed.4.weight']
+    del checkpoint['model']['class_embed.4.bias']
+    del checkpoint['model']['class_embed.5.weight']
+    del checkpoint['model']['class_embed.5.bias']
     model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
     if load_optim_state:
         if 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:

@@ -133,8 +133,8 @@ class DeformableDETR(nn.Module):
                 srcs.append(src)
                 pos.append(pos_l)
 
-        query_embeds = self.query_embeds(queries)
-        hs, init_reference, inter_references = self.transformer(srcs, pos, query_embeds, queries_mask)
+        query_embeds = self.query_embed(queries)
+        hs, init_reference, inter_references = self.transformer(srcs, pos, query_embeds, ~queries_mask)
 
         outputs_objectness = []
         outputs_coords = []
@@ -144,7 +144,7 @@ class DeformableDETR(nn.Module):
             else:
                 reference = inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
-            outputs_class = self.class_embed[lvl](hs[lvl])
+            outputs_class = self.class_embed[lvl](hs[lvl]).sigmoid().squeeze(-1)
             tmp = self.bbox_embed[lvl](hs[lvl])
             if reference.shape[-1] == 4:
                 tmp += reference
