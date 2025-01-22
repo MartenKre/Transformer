@@ -21,6 +21,7 @@ import torch.distributed as dist
 from torch import Tensor
 
 # needed due to empty tensor bug in pytorch and torchvision 0.5
+from torch.serialization import PROTOCOL_VERSION
 import torchvision
 
 from util.box_ops import box_cxcywh_to_xyxy, box_iou
@@ -198,7 +199,7 @@ class BasicLogger():
         if iou_thresh not in self.stats_dict[mode]['mAP']:
             self.stats_dict[mode]['mAP'][iou_thresh] = {}
 
-        conf_threshs = np.linspace(start=0.05, stop=0.95, num=60)
+        conf_threshs = np.linspace(start=0.0005, stop=0.995, num=60)
         for c_t in conf_threshs:
             c_t = round(c_t, 3)
             if c_t not in self.stats_dict[mode]['mAP'][iou_thresh]:
@@ -263,7 +264,6 @@ class BasicLogger():
 
     def print_mAP50(self, mode="val"):
         pr_curve = []
-        precision_list = []
         target_dict = self.stats_dict[mode]['mAP'][0.5]
         for ct in target_dict:
             tp = target_dict[ct]['tp']
@@ -272,14 +272,14 @@ class BasicLogger():
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0
             pr_curve.append((precision, recall))
-            precision_list.append(precision)
         pr_curve = sorted(pr_curve, key=lambda x: x[1])
+        pr_curve.insert(0, (pr_curve[0][0], 0, 1))
+        pr_curve.append((0, pr_curve[-1][1], 0))
         area = sum([(x[1]-pr_curve[i-1][1])*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
         ap_50 = round(area, 4)
-        result = round(sum(precision_list) / len(precision_list), 4)
-        print("mAP@50: ", result)
-        self.stats_output['mAP@50'] = result
-        return result
+        print("AP@50: ", ap_50)
+        self.stats_output['AP@50'] = ap_50
+        return ap_50
 
     def print_mAP50_95(self, mode="val"):
         result = []
@@ -295,11 +295,13 @@ class BasicLogger():
                 recall = tp / (tp + fn) if (tp + fn) > 0 else 0
                 pr_curve.append((precision, recall))
             pr_curve = sorted(pr_curve, key=lambda x: x[1])
+            pr_curve.insert(0, (pr_curve[0][0], 0, 1))
+            pr_curve.append((0, pr_curve[-1][1], 0))
             ap_i = sum([(x[1]-pr_curve[i-1][1])*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
             result.append(ap_i)
         result = round(sum(result)/len(result), 4)
-        print("mAP@[.5:.95]: ", result)
-        self.stats_output['mAP@[.5:.95]'] = result
+        print("AP@[.5:.95]: ", result)
+        self.stats_output['AP@[.5:.95]'] = result
         return result
 
     def printCF(self, thresh=0.5, mode='val'):
@@ -334,6 +336,10 @@ class BasicLogger():
             content_dict = "".join([str(f"{k}: {v}".ljust(21)) for d in [v for v in self.stats_output.values() if isinstance(v, dict)] for k, v in d.items()])
             file.write(start + content + content_dict + "\n")
 
+    def writeEpochStatsLog(self, path, best_epoch):
+        with open(os.path.join(path, 'log_stats.txt'), 'a') as file:
+            file.write("Best Val results during epoch " + str(best_epoch) + "\n")
+
     def plotPRCurve(self, path, mode='val'):
         pr_pairs = []
         for t in self.stats_dict[mode]['PR']:
@@ -363,6 +369,43 @@ class BasicLogger():
         plt.xlim(0, 1)
         plt.ylim(0, 1)
         plt.savefig(os.path.join(path, 'PR_Curve.pdf'))
+        plt.close()
+
+    def plotPRCurveDet(self, path, mode="val", iou_thresh=0.5):
+        pr_curve = []
+        target_dict = self.stats_dict[mode]['mAP'][iou_thresh]
+        for ct in target_dict:
+            tp = target_dict[ct]['tp']
+            fp = target_dict[ct]['fp']
+            fn = target_dict[ct]['fn']
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            pr_curve.append((precision, recall, ct))
+        pr_curve = sorted(pr_curve, key=lambda x: x[1])
+        start_val = (pr_curve[0][0], 0, 1)
+        pr_curve.insert(0, start_val)
+        end_val = (0, pr_curve[-1][1], 0)
+        pr_curve.append(end_val)
+        y,x,z = zip(*pr_curve)
+
+        z = np.array(z)
+        norm = plt.Normalize(vmin=z.min(), vmax=z.max())
+        cmap = plt.cm.viridis
+        colors = cmap(norm(z))
+
+        fig, ax = plt.subplots()
+        for i in range(len(x)-1):
+            ax.plot(x[i:i+2], y[i:i+2], color=colors[i])
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array(z)
+        cbar = plt.colorbar(sm, ax=ax)
+        cbar.set_label("Threshold")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.savefig(os.path.join(path, 'PR_Curve_Det.pdf'))
         plt.close()
 
     def plotLoss(self, path):
@@ -525,7 +568,6 @@ class NestedTensor(object):
         self.mask = mask
 
     def to(self, device):
-        # type: (Device) -> NestedTensor # noqa
         cast_tensor = self.tensors.to(device)
         mask = self.mask
         if mask is not None:

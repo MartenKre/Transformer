@@ -17,7 +17,6 @@ from util.misc import save_on_master, BasicLogger
 def init_position_encoding(hidden_dim):
     N_steps = hidden_dim // 2
     position_embedding = PositionEmbeddingSine(N_steps, normalize=True)
-
     return position_embedding
 
 
@@ -141,9 +140,9 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
                 "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
         logger.updateLosses(results, epoch, 'val')
         logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
-        map50 = logger.print_mAP50(mode='val')
+        ap50 = logger.print_mAP50(mode='val')
         logger.print_mAP50_95(mode="val")
-        results['mAP50'] = map50
+        results['AP50'] = ap50
         return results
     else:
         return None
@@ -196,8 +195,8 @@ batch_size=4
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
-epochs=80
-lr_drop=200
+epochs=120
+lr_drop=65
 clip_max_norm=0.0
 num_workers = 4
 if distributed:
@@ -276,7 +275,8 @@ if transfer_learning:
 logger = BasicLogger()
 print("Start training")
 start_time = time.time()
-best_map = -1
+best_ap = -1
+best_epoch = -1
 for epoch in range(start_epoch, epochs):
     logger.resetStats() # clear logger for new epoch
 
@@ -293,11 +293,13 @@ for epoch in range(start_epoch, epochs):
         logger.saveLossLogs(output_dir)
         logger.saveStatsLogs(output_dir, epoch)
         logger.plotLoss(output_dir)
-        if val_results["mAP50"] > best_map:
+        if val_results["AP50"] > best_ap:
             print("Saved new model as best.pht")
             logger.plotPRCurve(path=output_dir, mode='val')
             logger.plotConfusionMat(path=output_dir, thresh = 0.5, mode='val')
-            best_map = val_results["mAP50"]
+            logger.plotPRCurveDet(path=output_dir, mode="val")
+            best_ap = val_results["AP50"]
+            best_epoch = epoch
             save_on_master({
                 'model': model_without_ddp.state_dict(),
                 'optimizer': optimizer.state_dict(),
@@ -311,3 +313,5 @@ hours = int(total_time // 3600)
 minutes = int((total_time - hours*3600) // 60)
 seconds = int((total_time - hours*3600 - 60*minutes))
 print(f'Training time {hours:02}:{minutes:02}:{seconds:02}')
+logger.writeEpochStatsLog(path=output_dir, best_epoch=best_epoch)
+print("Best Val results in epoch: ", epoch)
