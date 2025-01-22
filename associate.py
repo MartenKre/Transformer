@@ -13,9 +13,10 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from torch._prims_common import dtype_to_type
 from torchvision import transforms
 
-from models.detr import DETR, PostProcess
-from models.transformer import Transformer
-from models.backbone import Backbone, Joiner
+from models.detr import PostProcess
+from models.deformable_detr import DeformableDETR
+from models.deformable_transformer import DeformableTransformer
+from models.deformable_backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
 from util.association_utility import getIMUData, filterBuoys, createQueryData, GetGeoData, LatLng2ECEF, T_ECEF_Ship
 from util.plot_utils import plot_one_box
@@ -28,29 +29,29 @@ def init_position_encoding(hidden_dim):
     return position_embedding
 
 
-def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
+def init_backbone(lr_backbone, hidden_dim, num_feature_levels=4, backbone='resnet50', dilation=False):
     # masks are only used for image segmentation
-
     position_embedding = init_position_encoding(hidden_dim)
     train_backbone = lr_backbone > 0
-    return_interm_layers = False
+    return_interm_layers = (num_feature_levels > 1)
     backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
     model = Joiner(backbone, position_embedding)
-    model.num_channels = backbone.num_channels
     return model
 
 
-def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
-    return Transformer(
+def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, num_feature_levels, dec_n_points, enc_n_points):
+    return DeformableTransformer(
         d_model=hidden_dim,
-        dropout=dropout,
         nhead=nheads,
-        dim_feedforward=dim_feedforward,
         num_encoder_layers=enc_layers,
         num_decoder_layers=dec_layers,
-        normalize_before=pre_norm,
+        dim_feedforward=dim_feedforward,
+        dropout=dropout,
+        activation="relu",
         return_intermediate_dec=True,
-    )
+        num_feature_levels=num_feature_levels,
+        dec_n_points=dec_n_points,
+        enc_n_points=enc_n_points)
 
 
 def draw_boxes(frame, boxes, confs, colors):
@@ -133,12 +134,12 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "run_MLP8/best.pth"
+path_to_weights = "training_results/deformable/run2/best.pth"
 
 path_to_video = "/home/marten/Uni/Semester_4/src/TestData/955_2.avi"
 path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
-path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
-path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
+# path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
+# path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
 # path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi"
 # path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt"
 # path_to_video = "../TestData/videos_from_training/19_2.avi"
@@ -148,27 +149,31 @@ path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
 conf_thresh = .9    # threshhold of objectness pred -> only queries with pred_conf >= conf_thresh will be visualized
 resize_coeffs = [0.5, 0.5] # applied to image before inference, 0 -> x, 1 -> y
 
-# Model settings:
+# Transformer
 hidden_dim = 256    # embedding dim
 enc_layers = 6      # encoding layers
 dec_layers = 6      # decoding layers
-dim_feedforward = 2048  # dim of ff layers in transformer layers
+dim_feedforward = 1024  # dim of ff layers in transformer layers
 dropout = 0.1
 nheads = 8          # transformear heads
 pre_norm = True     # apply norm pre or post tranformer layer
 input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
 use_embeddings = False
+num_feature_levels = 4
+dec_n_points = 4
+enc_n_points = 4
+with_box_refine = False
 
 # Init Model
-backbone = init_backbone(1e-5, hidden_dim)
-transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm)
-model = DETR(
+backbone = init_backbone(1e-5, hidden_dim, num_feature_levels)
+transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, num_feature_levels, dec_n_points, enc_n_points)
+model = DeformableDETR(
     backbone,
     transformer,
-    input_dim_gt=2,
+    input_dim_queries=2,
+    num_feature_levels=num_feature_levels,
     aux_loss=False,
-    use_embeddings=use_embeddings,
-)
+    with_box_refine=with_box_refine)
 model.to(device)
 model.eval()
 
