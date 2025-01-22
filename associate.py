@@ -133,12 +133,12 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "run_MLP8/best.pth"
+path_to_weights = "training_results/run_MLP9/best.pth"
 
 path_to_video = "/home/marten/Uni/Semester_4/src/TestData/955_2.avi"
 path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
-path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
-path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
+# path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
+# path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
 # path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi"
 # path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt"
 # path_to_video = "../TestData/videos_from_training/19_2.avi"
