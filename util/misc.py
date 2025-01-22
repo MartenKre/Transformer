@@ -277,7 +277,7 @@ class BasicLogger():
         area = sum([(x[1]-pr_curve[i-1][1])*max(x[0], pr_curve[i-1][0]) for i,x in enumerate(pr_curve) if i > 0])
         ap_50 = round(area, 4)
         result = round(sum(precision_list) / len(precision_list), 4)
-        print("mAP@50: ", result)
+        print(f"mAP@50: {result} ({ap_50})")
         self.stats_output['mAP@50'] = result
         return result
 
