@@ -1,3 +1,4 @@
+from json import decoder, encoder
 import torch
 import os
 import time
@@ -7,42 +8,79 @@ from tqdm import tqdm
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader
-from models.detr import DETR, SetCriterion
-from models.transformer import Transformer
-from models.backbone import Backbone, Joiner
-from models.position_encoding import PositionEmbeddingSine 
+from models.hybrid_encoder import HybridEncoder
+from models.rtdetr_decoder import RTDETRTransformer
+from models.presnet import PResNet
+from models.rtdetr import RTDETR
+from models.rtdetr_criterion import SetCriterion
 from util.misc import save_on_master, BasicLogger
 
 
-def init_position_encoding(hidden_dim):
-    N_steps = hidden_dim // 2
-    position_embedding = PositionEmbeddingSine(N_steps, normalize=True)
-    return position_embedding
+def init_hybrid_encoder():
+    in_channels=[512, 1024, 2048]
+    feat_strides=[8, 16, 32]
+    hidden_dim=256
+    nhead=8
+    dim_feedforward = 1024
+    dropout=0.0
+    enc_act='gelu'
+    use_encoder_idx=[2]
+    num_encoder_layers=1
+    pe_temperature=10000
+    expansion=1.0
+    depth_mult=1.0
+    act='silu'
+    eval_spatial_size=None
+    return HybridEncoder(in_channels, feat_strides, hidden_dim, nhead, dim_feedforward, dropout, 
+                         enc_act, use_encoder_idx, num_encoder_layers, pe_temperature, expansion,
+                         depth_mult, act, eval_spatial_size)
 
 
-def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
-    # masks are only used for image segmentation
+def init_backbone():
+    depth=50 
+    variant='d' 
+    num_stages=4 
+    return_idx=[1, 2, 3] 
+    act='relu'
+    freeze_at=0
+    freeze_norm=True 
+    pretrained=True
+    return PResNet(depth, variant, num_stages, return_idx, act, freeze_at, freeze_norm, pretrained)
 
-    position_embedding = init_position_encoding(hidden_dim)
-    train_backbone = lr_backbone > 0
-    return_interm_layers = False
-    backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
-    model = Joiner(backbone, position_embedding)
-    model.num_channels = backbone.num_channels
-    return model
 
+def init_decoder(aux_loss, dec_layers):
+    num_classes=80  # unused
+    hidden_dim=256
+    num_queries=300 # unused
+    position_embed_type='sine'
+    feat_channels=[256, 256, 256]
+    feat_strides=[8, 16, 32]
+    num_levels=3
+    num_decoder_points=4
+    nhead=8
+    num_decoder_layers=dec_layers
+    dim_feedforward=1024
+    dropout=0.
+    activation="relu"
+    num_denoising=0
+    label_noise_ratio=0.5
+    box_noise_scale=1.0
+    learnt_init_query=False     # set to False
+    eval_spatial_size=None
+    eval_idx=-1
+    eps=1e-2,
+    aux_loss=aux_loss
+    return RTDETRTransformer(num_classes, hidden_dim, num_queries, position_embed_type, feat_channels, feat_strides,
+                             num_levels, num_decoder_points, nhead, num_decoder_layers, dim_feedforward, dropout,
+                             activation, num_denoising, label_noise_ratio, box_noise_scale, learnt_init_query,
+                             eval_spatial_size, eval_idx, eps, aux_loss)
 
-def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
-    return Transformer(
-        d_model=hidden_dim,
-        dropout=dropout,
-        nhead=nheads,
-        dim_feedforward=dim_feedforward,
-        num_encoder_layers=enc_layers,
-        num_decoder_layers=dec_layers,
-        normalize_before=pre_norm,
-        return_intermediate_dec=True,
-    )
+def init_rt_detr(backbone, encoder, decoder):
+    backbone=backbone
+    encoder=encoder
+    decoder=decoder
+    multi_scale=None
+    return RTDETR(backbone, encoder, decoder, multi_scale)
 
 
 def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm=0.1, logger=None):
@@ -156,38 +194,28 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
 transfer_learning = True    # Loads prev provided weights
 load_optim_state = False    # Loads state of optimizer / training if set to True
 start_epoch = 0             # set this if continuing prev training
-path_to_weights = r"detr-r50-e632da11.pth" 
+path_to_weights = r"rtdetr_r50vd_6x_coco_from_paddle.pth" 
 output_dir = "test"
 
 # Backbone
 lr_backbone = 1e-5
 
-# Transformer
-hidden_dim = 256    # embedding dim
-enc_layers = 6      # encoding layers
-dec_layers = 6      # decoding layers
-dim_feedforward = 2048  # dim of ff layers in transformer layers
-dropout = 0.1
-nheads = 8          # transformear heads
-pre_norm = True     # apply norm pre or post tranformer layer
-input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
-use_embeddings = False
 
 # Multi GPU
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 distributed = False
 
 # Dataset
-# path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset1/dataset.yaml"
 path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/dataset.yaml"
 if distributed:
     path_to_dataset = "/data/mkreis/dataset2/dataset.yaml"
 
 # Loss
-aux_loss = True
 bce_loss_coef = 1
 bbox_loss_coef = 2
 giou_loss_coef = 5
+aux_loss = True
+dec_layers = 6
 
 # Optimizer / DataLoader
 lr = 1e-4
@@ -204,15 +232,10 @@ if distributed:
 
 
 # Init Model
-backbone = init_backbone(lr_backbone, hidden_dim)
-transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm)
-model = DETR(
-    backbone,
-    transformer,
-    input_dim_gt=2,
-    aux_loss=aux_loss,
-    use_embeddings=use_embeddings,
-)
+backbone = init_backbone()
+encoder = init_hybrid_encoder()
+decoder = init_decoder(aux_loss, dec_layers)
+model = init_rt_detr(backbone, encoder, decoder)
 model.to(device)
 
 model_without_ddp = model
