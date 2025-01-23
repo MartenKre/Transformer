@@ -12,7 +12,6 @@ from .utils import get_activation
 __all__ = ['HybridEncoder']
 
 
-
 class ConvNormLayer(nn.Module):
     def __init__(self, ch_in, ch_out, kernel_size, stride, padding=None, bias=False, act=None):
         super().__init__()

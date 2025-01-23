@@ -9,7 +9,8 @@ import torch
 import torch.nn as nn 
 import torch.nn.functional as F 
 
-import box_ops
+
+from . import box_ops
 
 from .dist import get_world_size, is_dist_available_and_initialized
 

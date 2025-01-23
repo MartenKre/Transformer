@@ -4,6 +4,7 @@ import os
 import time
 import math
 import sys
+from torch.utils.checkpoint import checkpoint
 from tqdm import tqdm
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
@@ -37,13 +38,13 @@ def init_hybrid_encoder():
 
 
 def init_backbone():
-    depth=50 
-    variant='d' 
-    num_stages=4 
-    return_idx=[1, 2, 3] 
+    depth=50
+    variant='d'
+    num_stages=4
+    return_idx=[1, 2, 3]
     act='relu'
     freeze_at=0
-    freeze_norm=True 
+    freeze_norm=True
     pretrained=True
     return PResNet(depth, variant, num_stages, return_idx, act, freeze_at, freeze_norm, pretrained)
 
@@ -56,7 +57,7 @@ def init_decoder(aux_loss, dec_layers):
     feat_channels=[256, 256, 256]
     feat_strides=[8, 16, 32]
     num_levels=3
-    num_decoder_points=4
+    num_decoder_points=4    # default 4
     nhead=8
     num_decoder_layers=dec_layers
     dim_feedforward=1024
@@ -68,7 +69,7 @@ def init_decoder(aux_loss, dec_layers):
     learnt_init_query=False     # set to False
     eval_spatial_size=None
     eval_idx=-1
-    eps=1e-2,
+    eps=1e-2
     aux_loss=aux_loss
     return RTDETRTransformer(num_classes, hidden_dim, num_queries, position_embed_type, feat_channels, feat_strides,
                              num_levels, num_decoder_points, nhead, num_decoder_layers, dim_feedforward, dropout,
@@ -101,7 +102,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             queries_mask = queries_mask.to(device)
             labels_mask = labels_mask.to(device)
 
-            outputs = model(images, queries, queries_mask)
+            outputs = model(images, query=queries, query_mask=queries_mask)
             loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
             weight_dict = criterion.weight_dict
 
@@ -128,6 +129,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
 
             optimizer.step()
+            break
 
     if logger is not None:
         losses ={"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
@@ -156,7 +158,7 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
             queries_mask = queries_mask.to(device)
             labels_mask = labels_mask.to(device)
 
-            outputs = model(images, queries, queries_mask)
+            outputs = model(images, query=queries, query_mask=queries_mask)
             loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
             weight_dict = criterion.weight_dict
 
@@ -218,8 +220,9 @@ aux_loss = True
 dec_layers = 6
 
 # Optimizer / DataLoader
-lr = 1e-4
-batch_size=4
+lr = 2e-4
+lr_backbone = 1e-5
+batch_size=2
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
@@ -237,6 +240,7 @@ encoder = init_hybrid_encoder()
 decoder = init_decoder(aux_loss, dec_layers)
 model = init_rt_detr(backbone, encoder, decoder)
 model.to(device)
+
 
 model_without_ddp = model
 if distributed:
@@ -284,9 +288,8 @@ data_loader_val = DataLoader(dataset_val, batch_size, sampler=sampler_val, drop_
 # load init weights if performing transfer learning
 if transfer_learning:
     print("loading weights..")
-    checkpoint = torch.load(path_to_weights, map_location='cpu')
-    del checkpoint['model']['class_embed.weight']
-    del checkpoint['model']['class_embed.bias']
+    weights = torch.load(path_to_weights, map_location='cpu')
+    checkpoint = weights if 'model' in weights else {'model': weights}
     model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
     if load_optim_state:
         if 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
