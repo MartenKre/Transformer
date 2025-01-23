@@ -259,17 +259,12 @@ class TransformerDecoder(nn.Module):
 
             inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(ref_points_detach))
 
-            if self.training:
-                dec_out_logits.append(score_head[i](output).sigmoid().squeeze(-1))
-                if i == 0:
-                    dec_out_bboxes.append(inter_ref_bbox)
-                else:
-                    dec_out_bboxes.append(F.sigmoid(bbox_head[i](output) + inverse_sigmoid(ref_points)))
-
-            elif i == self.eval_idx:
-                dec_out_logits.append(score_head[i](output).sigmoid().squeeze(-1))
+            dec_out_logits.append(score_head[i](output).sigmoid().squeeze(-1))
+            if i == 0:
                 dec_out_bboxes.append(inter_ref_bbox)
-                break
+            else:
+                dec_out_bboxes.append(F.sigmoid(bbox_head[i](output) + inverse_sigmoid(ref_points)))
+
 
             ref_points = inter_ref_bbox
             ref_points_detach = inter_ref_bbox.detach(
@@ -509,12 +504,12 @@ class RTDETRTransformer(nn.Module):
         else:
             target = output_memory.gather(dim=1, \
                 index=topk_ind.unsqueeze(-1).repeat(1, 1, output_memory.shape[-1]))
-            target = target.detach()
+            # target = target.detach()
 
         if denoising_class is not None:
             target = torch.concat([denoising_class, target], 1)
 
-        return target, reference_points_unact.detach(), enc_topk_bboxes, enc_topk_logits
+        return target, reference_points_unact, enc_topk_bboxes, enc_topk_logits     # reference_points_unact.detach()
 
 
     def forward(self, feats, targets=None, query=None, query_mask=None):
@@ -565,7 +560,7 @@ class RTDETRTransformer(nn.Module):
 
         out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1]}
 
-        if self.training and self.aux_loss:
+        if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(out_logits[:-1], out_bboxes[:-1])
             # out['aux_outputs'].extend(self._set_aux_loss([enc_topk_logits], [enc_topk_bboxes]))
             

@@ -129,7 +129,6 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=True)
 
             optimizer.step()
-            break
 
     if logger is not None:
         losses ={"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
