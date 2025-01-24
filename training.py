@@ -221,7 +221,7 @@ dec_layers = 6
 # Optimizer / DataLoader
 lr = 2e-4
 lr_backbone = 1e-5
-batch_size=2
+batch_size=4
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
@@ -339,4 +339,4 @@ minutes = int((total_time - hours*3600) // 60)
 seconds = int((total_time - hours*3600 - 60*minutes))
 print(f'Training time {hours:02}:{minutes:02}:{seconds:02}')
 logger.writeEpochStatsLog(path=output_dir, best_epoch=best_epoch)
-print("Best Val results in epoch: ", epoch)
+print("Best Val results in epoch: ", best_epoch)
