@@ -13,44 +13,80 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from torch._prims_common import dtype_to_type
 from torchvision import transforms
 
-from models.detr import DETR, PostProcess
-from models.transformer import Transformer
-from models.backbone import Backbone, Joiner
-from models.position_encoding import PositionEmbeddingSine 
+from models.rtdetr_postprocessor import PostProcess
+from models.hybrid_encoder import HybridEncoder
+from models.presnet import PResNet
+from models.rtdetr_decoder import RTDETRTransformer
+from models.rtdetr import RTDETR
 from util.association_utility import getIMUData, filterBuoys, createQueryData, GetGeoData, LatLng2ECEF, T_ECEF_Ship
 from util.plot_utils import plot_one_box
 
 
-def init_position_encoding(hidden_dim):
-    N_steps = hidden_dim // 2
-    position_embedding = PositionEmbeddingSine(N_steps, normalize=True)
+def init_hybrid_encoder():
+    in_channels=[512, 1024, 2048]
+    feat_strides=[8, 16, 32]
+    hidden_dim=256
+    nhead=8
+    dim_feedforward = 1024
+    dropout=0.0
+    enc_act='gelu'
+    use_encoder_idx=[2]
+    num_encoder_layers=1
+    pe_temperature=10000
+    expansion=1.0
+    depth_mult=1.0
+    act='silu'
+    eval_spatial_size=None
+    return HybridEncoder(in_channels, feat_strides, hidden_dim, nhead, dim_feedforward, dropout, 
+                         enc_act, use_encoder_idx, num_encoder_layers, pe_temperature, expansion,
+                         depth_mult, act, eval_spatial_size)
 
-    return position_embedding
+
+def init_backbone():
+    depth=50
+    variant='d'
+    num_stages=4
+    return_idx=[1, 2, 3]
+    act='relu'
+    freeze_at=0
+    freeze_norm=True
+    pretrained=True
+    return PResNet(depth, variant, num_stages, return_idx, act, freeze_at, freeze_norm, pretrained)
 
 
-def init_backbone(lr_backbone, hidden_dim, backbone='resnet50', dilation=False):
-    # masks are only used for image segmentation
+def init_decoder(aux_loss, dec_layers):
+    num_classes=80  # unused
+    hidden_dim=256
+    num_queries=300 # unused
+    position_embed_type='sine'
+    feat_channels=[256, 256, 256]
+    feat_strides=[8, 16, 32]
+    num_levels=3
+    num_decoder_points=4    # default 4
+    nhead=8
+    num_decoder_layers=dec_layers
+    dim_feedforward=1024
+    dropout=0.
+    activation="relu"
+    num_denoising=0
+    label_noise_ratio=0.5
+    box_noise_scale=1.0
+    learnt_init_query=False     # set to False
+    eval_spatial_size=None
+    eval_idx=-1
+    eps=1e-2
+    aux_loss=aux_loss
+    return RTDETRTransformer(num_classes, hidden_dim, num_queries, position_embed_type, feat_channels, feat_strides,
+                             num_levels, num_decoder_points, nhead, num_decoder_layers, dim_feedforward, dropout,
+                             activation, num_denoising, label_noise_ratio, box_noise_scale, learnt_init_query,
+                             eval_spatial_size, eval_idx, eps, aux_loss)
 
-    position_embedding = init_position_encoding(hidden_dim)
-    train_backbone = lr_backbone > 0
-    return_interm_layers = False
-    backbone = Backbone(backbone, train_backbone, return_interm_layers, dilation)
-    model = Joiner(backbone, position_embedding)
-    model.num_channels = backbone.num_channels
-    return model
-
-
-def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm):
-    return Transformer(
-        d_model=hidden_dim,
-        dropout=dropout,
-        nhead=nheads,
-        dim_feedforward=dim_feedforward,
-        num_encoder_layers=enc_layers,
-        num_decoder_layers=dec_layers,
-        normalize_before=pre_norm,
-        return_intermediate_dec=True,
-    )
+def init_rt_detr(backbone, encoder, decoder):
+    backbone=backbone
+    encoder=encoder
+    decoder=decoder
+    multi_scale=None
+    return RTDETR(backbone, encoder, decoder, multi_scale)
 
 
 def draw_boxes(frame, boxes, confs, colors):
@@ -133,7 +169,7 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "training_results/run_MLP9/best.pth"
+path_to_weights = "training_results/rt-detr/run1/best.pth"
 
 path_to_video = "/home/marten/Uni/Semester_4/src/TestData/955_2.avi"
 path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
@@ -148,27 +184,11 @@ path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
 conf_thresh = .9    # threshhold of objectness pred -> only queries with pred_conf >= conf_thresh will be visualized
 resize_coeffs = [0.5, 0.5] # applied to image before inference, 0 -> x, 1 -> y
 
-# Model settings:
-hidden_dim = 256    # embedding dim
-enc_layers = 6      # encoding layers
-dec_layers = 6      # decoding layers
-dim_feedforward = 2048  # dim of ff layers in transformer layers
-dropout = 0.1
-nheads = 8          # transformear heads
-pre_norm = True     # apply norm pre or post tranformer layer
-input_dim_gt = 2    # Amount of datapoints of a query object before being transformed to embedding
-use_embeddings = False
-
 # Init Model
-backbone = init_backbone(1e-5, hidden_dim)
-transformer = init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, dec_layers, pre_norm)
-model = DETR(
-    backbone,
-    transformer,
-    input_dim_gt=2,
-    aux_loss=False,
-    use_embeddings=use_embeddings,
-)
+backbone = init_backbone()
+encoder = init_hybrid_encoder()
+decoder = init_decoder(True, 6)
+model = init_rt_detr(backbone, encoder, decoder)
 model.to(device)
 model.eval()
 
@@ -223,7 +243,7 @@ while cap.isOpened():
         img = img.unsqueeze(0).to(device)
 
         with torch.no_grad():
-            outputs = model(img, queries, queries_mask)
+            outputs = model(img, query=queries, query_mask=queries_mask)
         outputs = postprocess(outputs, target_size=[frame.shape[0], frame.shape[1]])  # convert boxes from cxcyhw -> xyxy w.r.t. original image size
         pred_obj = outputs['objectness'].cpu().detach()
         pred_boxes = outputs['boxes'][pred_obj>=conf_thresh].cpu().detach()    # filter boxes based on objectness thresh
