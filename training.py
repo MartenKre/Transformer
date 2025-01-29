@@ -21,7 +21,7 @@ from pprint import pprint
 import torchmetrics
 
 def init_obj_det_critetion():
-    weight_dict_loss = {"loss_labels": 1, "loss_bbox": 5, "loss_giou": 2}
+    weight_dict_loss = {"loss_labels": 20, "loss_bbox": 5, "loss_giou": 2}
     losses = ["labels", "boxes"]
     weight_dict_matcher = {"cost_class": 2, "cost_bbox": 5, "cost_giou": 2}
     matcher = HungarianMatcher(weight_dict_matcher)
