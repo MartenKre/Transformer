@@ -27,7 +27,7 @@ class SetCriterion(nn.Module):
     __share__ = ['num_classes', ]
     __inject__ = ['matcher', ]
 
-    def __init__(self, matcher, weight_dict, losses, alpha=0.75, gamma=2.0, eos_coef=1e-4, num_classes=1):
+    def __init__(self, matcher, weight_dict, losses, alpha=0.75, gamma=2.0, eos_coef=0.1, num_classes=1):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
