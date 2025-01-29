@@ -30,7 +30,7 @@ class RTDETR(nn.Module):
             
         x = self.backbone(x)
         x = self.encoder(x)        
-        x = self.decoder(x, targets, query, query_mask)
+        x = self.decoder(x, targets)
 
         return x
     

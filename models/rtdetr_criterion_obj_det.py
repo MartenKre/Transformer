@@ -183,7 +183,6 @@ class SetCriterion(nn.Module):
             'labels': self.loss_labels,
             'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
-            'masks': self.loss_masks,
 
             'bce': self.loss_labels_bce,
             'focal': self.loss_labels_focal,

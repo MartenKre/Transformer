@@ -16,14 +16,14 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 def collate_fn(batch):
-    img, queries, labels, queries_mask, labels_mask, name = zip(*batch)
+    img, queries, labels, queries_mask, labels_mask, name, target = zip(*batch)
     img = torch.stack(img, dim=0)
     pad_q = pad_sequence(queries, batch_first=True, padding_value = 0.0)
     pad_l = pad_sequence(labels, batch_first=True, padding_value = 0.0)
     pad_mask_q = pad_sequence(queries_mask, batch_first=True, padding_value=False)
     pad_mask_l = pad_sequence(labels_mask, batch_first=True, padding_value=False)
 
-    return img, pad_q, pad_l, pad_mask_q, pad_mask_l, name
+    return img, pad_q, pad_l, pad_mask_q, pad_mask_l, name, target
     
 
 class BuoyDataset(Dataset):

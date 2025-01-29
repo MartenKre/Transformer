@@ -60,9 +60,9 @@ def init_backbone():
 
 
 def init_decoder(aux_loss, dec_layers):
-    num_classes=80  # unused
+    num_classes=1  
     hidden_dim=256
-    num_queries=300 # unused
+    num_queries=300 
     position_embed_type='sine'
     feat_channels=[256, 256, 256]
     feat_strides=[8, 16, 32]
@@ -111,14 +111,16 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             labels = labels.to(device)
             queries_mask = queries_mask.to(device)
             labels_mask = labels_mask.to(device)
+            target = [{k: v.to(device) for k, v in dict_t.items()} for dict_t in target]
 
-            outputs = model(images, query=queries, query_mask=queries_mask)
-            loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
+            outputs = model(images, targets=target, query=queries, query_mask=queries_mask)
+            # loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
+            loss_dict = criterion(outputs, target)
             weight_dict = criterion.weight_dict
 
             losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys())
             loss_total.append(losses.item())
-            loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_bce' in k).item())
+            loss_obj.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_vfl' in k).item())
             loss_boxL1.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_bbox' in k).item())
             loss_giou.append(sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if 'loss_giou' in k).item())
             tqdm_str = {"Loss": f"{round(sum(loss_total)/len(loss_total) ,3)}",

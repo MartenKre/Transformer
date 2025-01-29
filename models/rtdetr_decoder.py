@@ -15,13 +15,6 @@ from .utils import deformable_attention_core_func, get_activation, inverse_sigmo
 from .utils import bias_init_with_prob
 
 
-from src.core import register
-
-
-__all__ = ['RTDETRTransformer']
-
-
-
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers, act='relu'):
         super().__init__()
@@ -278,7 +271,6 @@ class TransformerDecoder(nn.Module):
         return torch.stack(dec_out_bboxes), torch.stack(dec_out_logits)
 
 
-@register
 class RTDETRTransformer(nn.Module):
     __share__ = ['num_classes']
     def __init__(self,
