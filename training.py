@@ -262,15 +262,16 @@ n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print('number of params:', n_parameters)
 
 # Init Loss
-weight_dict = {'loss_bce': bce_loss_coef, 'loss_bbox': bbox_loss_coef}
-weight_dict['loss_giou'] = giou_loss_coef
-if aux_loss:
-    aux_weight_dict = {}
-    for i in range(dec_layers - 1):
-        aux_weight_dict.update({k + f'_{i}': v for k, v in weight_dict.items()})
-    weight_dict.update(aux_weight_dict)
-losses = ['labels', 'boxes']
-criterion = SetCriterion(weight_dict, losses)
+# weight_dict = {'loss_bce': bce_loss_coef, 'loss_bbox': bbox_loss_coef}
+# weight_dict['loss_giou'] = giou_loss_coef
+# if aux_loss:
+#     aux_weight_dict = {}
+#     for i in range(dec_layers - 1):
+#         aux_weight_dict.update({k + f'_{i}': v for k, v in weight_dict.items()})
+#     weight_dict.update(aux_weight_dict)
+# losses = ['labels', 'boxes']
+# criterion = SetCriterion(weight_dict, losses)
+criterion = init_obj_det_critetion()
 
 # Init Optim
 param_dicts = [
