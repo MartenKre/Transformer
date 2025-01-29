@@ -15,7 +15,17 @@ from models.presnet import PResNet
 from models.rtdetr import RTDETR
 from models.rtdetr_criterion import SetCriterion
 from util.misc import save_on_master, BasicLogger
+from models.rtdetr_criterion_obj_det import SetCriterion
+from models.matcher import HungarianMatcher
 
+
+def init_obj_det_critetion():
+    weight_dict_loss = {"loss_vfl": 1, "loss_bbox": 5, "loss_giou": 2}
+    losses = ["vfl", "boxes"]
+    weight_dict_matcher = {"cost_class": 2, "cost_bbox": 5, "cost_giou": 2}
+    matcher = HungarianMatcher(weight_dict_matcher)
+    criterion = SetCriterion(matcher, weight_dict_loss, losses, num_classes=1)
+    return criterion
 
 def init_hybrid_encoder():
     in_channels=[512, 1024, 2048]
@@ -94,7 +104,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
     loss_giou = []
 
     with tqdm(data_loader, desc=str(f"Train - Epoch {epoch}").ljust(16), ncols=150) as pbar:
-        for images, queries, labels, queries_mask, labels_mask, name in pbar:
+        for images, queries, labels, queries_mask, labels_mask, name, target in pbar:
             images = images.to(device)
             queries = queries.to(device)
             queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
@@ -149,7 +159,7 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
     loss_boxL1 = []
     loss_giou = []
     with tqdm(data_loader, desc=str(f"Val - Epoch {epoch}").ljust(16), ncols=150) as pbar:
-        for images, queries, labels, queries_mask, labels_mask, name in pbar:
+        for images, queries, labels, queries_mask, labels_mask, name, target in pbar:
             images = images.to(device)
             queries = queries.to(device)
             queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)

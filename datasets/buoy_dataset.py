@@ -134,6 +134,16 @@ class BuoyDataset(Dataset):
 
         name = os.path.join(self.data_path, "images", self.images[index])
 
-        sample = (img, queries, labels_extended, queries_mask, labels_mask, name)
+        # add target dict for rt-detr loss
+        target = {}
+        if labels.numel() > 0:
+            labels_target = labels[...,1:]
+            target["boxes"] = labels_target
+            target["labels"] = torch.zeros((labels.size(0)), dtype=torch.long)
+        else:
+            target["boxes"] = torch.empty((0, 4), dtype=torch.float32)
+            target["labels"] = torch.empty((0,), dtype=torch.long)
+
+        sample = (img, queries, labels_extended, queries_mask, labels_mask, name, target)
         return sample
         
