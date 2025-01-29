@@ -162,6 +162,26 @@ def reduce_dict(input_dict, average=True):
     return reduced_dict
 
 
+def prepare_ap_data(outputs, labels, labels_mask):
+    src_boxes = outputs['pred_boxes']
+    src_logits = outputs['pred_logits'].sigmoid().squeeze()
+    labels = labels[..., 1:]
+    preds = []
+    target = []
+    batch_size=src_boxes.size(0)
+    for i in range(0, batch_size):
+        dct = {"boxes": src_boxes[i],
+               "scores": src_logits[i],
+               "labels": torch.zeros_like(src_logits[i], device=src_logits.device, dtype=int)}
+        preds.append(dct)
+
+        dct2 = {"boxes": labels[i][labels_mask[i]],
+                "labels": torch.zeros((labels_mask[i].sum()), device=labels_mask.device, dtype=int)}
+        target.append(dct2)
+
+    return preds, target
+
+
 class BasicLogger():
     def __init__(self):
         self.entries = {}   # dict containing loss logs

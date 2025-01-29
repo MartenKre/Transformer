@@ -7,9 +7,11 @@ by lyuwenyu
 
 
 import torch 
+from torch._C import device
 import torch.nn as nn 
 import torch.nn.functional as F 
 import torchvision
+import pprint
 
 # from torchvision.ops import box_convert, generalized_box_iou
 from .box_ops import box_cxcywh_to_xyxy, box_iou, generalized_box_iou
@@ -43,26 +45,30 @@ class SetCriterion(nn.Module):
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = eos_coef
         self.register_buffer('empty_weight', empty_weight)
+        self.eos_coef = eos_coef
 
         self.alpha = alpha
         self.gamma = gamma
 
 
-    def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
+    def loss_labels(self, outputs, targets, indices, num_boxes, log=False):
         """Classification loss (NLL)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
         assert 'pred_logits' in outputs
-        src_logits = outputs['pred_logits']
+        src_logits = outputs['pred_logits'].sigmoid().squeeze(-1)
 
         idx = self._get_src_permutation_idx(indices)
         target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
-        target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device)
-        target_classes[idx] = target_classes_o
+        target_classes = torch.full(src_logits.shape[:2], 0., device=src_logits.device) # fill tensor with 0's by defautl
+        target_classes[idx] = 1.     # predict objectness = 1 when box is matched to obj
+        torch.set_printoptions(threshold=torch.inf)
 
-        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight)
-        losses = {'loss_ce': loss_ce}
+        weight_tensor = torch.full_like(target_classes, fill_value=self.eos_coef, device=src_logits.device)
+        weight_tensor[idx] = 1.
+
+        loss_bce = F.binary_cross_entropy(src_logits, target_classes,weight=weight_tensor)
+        losses = {'loss_labels': loss_bce}
 
         if log:
             # TODO this should probably be a separate loss, not hacked in this one here
