@@ -41,7 +41,7 @@ class SetCriterion(nn.Module):
         """
         assert 'pred_logits' in outputs
         src_logits = outputs['pred_logits']
-        
+
         targets = torch.zeros_like(src_logits) 
         targets[labels_mask] = 1.0 # target mask to find labels idx where objectness = 1
 

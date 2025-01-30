@@ -8,25 +8,24 @@ from .rtdetr_decoder import MLP
 
 
 class V2W_Transformer(nn.Module):
-    def __inti__(self, rt_detr, object_decoder):
+    def __init__(self, rt_detr, object_decoder):
         super().__init__()
         self.rt_detr = rt_detr
         self.object_decoder = object_decoder
 
-    def forward(self, x, target=None, queries=None, queries_mask=None):
-        out1, mem = self.rt_detr(x,target=target)
-        out2 = self.object_decoder(mem, queries, queries_mask)
+    def forward(self, x, targets=None, query=None, query_mask=None):
+        out1, mem = self.rt_detr(x,targets=targets)
+        out2 = self.object_decoder(mem, query, query_mask)
         return out1, out2
 
 
 class Transformer(nn.Module):
 
-    def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,
-                 num_decoder_layers=6, dim_feedforward=2048, dropout=0.1,
+    def __init__(self, d_model=256, nhead=8,
+                 num_decoder_layers=3, dim_feedforward=1024, dropout=0.1,
                  activation="relu", normalize_before=False,
-                 return_intermediate_dec=False):
+                 return_intermediate_dec=False, query_dim=2):
         super().__init__()
-
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
@@ -38,22 +37,26 @@ class Transformer(nn.Module):
 
         self.d_model = d_model
         self.nhead = nhead
+        self.bbox_embed = MLP(d_model, d_model, 4, 3)
+        self.query_embed = MLP(query_dim, d_model//2, d_model, 3)
+        self.objectness_embed = nn.Linear(d_model, 1)
 
     def _reset_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, query_embed, pos_embed, query_mask):
+    def forward(self, memory, query, query_mask):
         # flatten NxCxHxW to HWxNxC
-        bs, c, h, w = src.shape
-        src = src.flatten(2).permute(2, 0, 1)
-        pos_embed = pos_embed.flatten(2).permute(2, 0, 1)
-        query_embed = query_embed.permute(1, 0, 2)  # from NxSxH to SxNxH
+        memory = memory.permute(1, 0, 2) # [b, s, hidden] -> []
+        query_embed = self.query_embed(query).permute(1, 0, 2)
 
-        memory = self.encoder(src, pos=pos_embed)
-        hs = self.decoder(query_embed, memory, pos=pos_embed, tgt_key_padding_mask=query_mask)
-        return hs.transpose(1,2), memory.permute(1, 2, 0).view(bs, c, h, w)
+        hs = self.decoder(query_embed, memory, tgt_key_padding_mask=query_mask)[0].permute(1, 0, 2)
+
+        bbox_pred = self.bbox_embed(hs).sigmoid()
+        obj_logis = self.objectness_embed(hs).sigmoid().squeeze(-1)
+        out = {"pred_logits": obj_logis, "pred_boxes": bbox_pred}
+        return out
 
 
 class TransformerDecoder(nn.Module):
@@ -186,19 +189,6 @@ class TransformerDecoderLayer(nn.Module):
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
-
-
-def build_transformer(args):
-    return Transformer(
-        d_model=args.hidden_dim,
-        dropout=args.dropout,
-        nhead=args.nheads,
-        dim_feedforward=args.dim_feedforward,
-        num_encoder_layers=args.enc_layers,
-        num_decoder_layers=args.dec_layers,
-        normalize_before=args.pre_norm,
-        return_intermediate_dec=True,
-    )
 
 
 def _get_activation_fn(activation):

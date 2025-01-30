@@ -162,9 +162,12 @@ def reduce_dict(input_dict, average=True):
     return reduced_dict
 
 
-def prepare_ap_data(outputs, labels, labels_mask):
+def prepare_ap_data(outputs, labels, labels_mask, apply_sigmoid=True):
     src_boxes = outputs['pred_boxes']
-    src_logits = outputs['pred_logits'].sigmoid().squeeze()
+    if apply_sigmoid:   
+        src_logits = outputs['pred_logits'].sigmoid().squeeze()
+    else:
+        src_logits = outputs['pred_logits']
     labels = labels[..., 1:]
     preds = []
     target = []

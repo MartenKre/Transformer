@@ -9,11 +9,12 @@ from tqdm import tqdm
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader
+import models
 from models.hybrid_encoder import HybridEncoder
 from models.rtdetr_decoder import RTDETRTransformer
 from models.presnet import PResNet
 from models.rtdetr import RTDETR
-from models.rtdetr_criterion import SetCriterion
+from models.v2w_transformer import Transformer, V2W_Transformer
 from util.misc import save_on_master, BasicLogger, prepare_ap_data
 from models.rtdetr_criterion_obj_det import SetCriterion
 from models.matcher import HungarianMatcher
@@ -25,7 +26,13 @@ def init_obj_det_critetion():
     losses = ["labels", "boxes"]
     weight_dict_matcher = {"cost_class": 2, "cost_bbox": 5, "cost_giou": 2}
     matcher = HungarianMatcher(weight_dict_matcher)
-    criterion = SetCriterion(matcher, weight_dict_loss, losses, num_classes=1)
+    criterion = models.rtdetr_criterion_obj_det.SetCriterion(matcher, weight_dict_loss, losses, num_classes=1)
+    return criterion
+
+def init_obj_tf_criterion():
+    weight_dict_loss = {"loss_bce": 2, "loss_bbox": 5, "loss_giou": 2}
+    losses = ["labels", "boxes"]
+    criterion = models.obj_tf_criterion.SetCriterion(weight_dict_loss, losses)
     return criterion
 
 def init_hybrid_encoder():
@@ -63,7 +70,7 @@ def init_backbone():
 def init_decoder(aux_loss, dec_layers):
     num_classes=1  
     hidden_dim=256
-    num_queries=300 
+    num_queries=100 
     position_embed_type='sine'
     feat_channels=[256, 256, 256]
     feat_strides=[8, 16, 32]
@@ -94,12 +101,33 @@ def init_rt_detr(backbone, encoder, decoder):
     multi_scale=None
     return RTDETR(backbone, encoder, decoder, multi_scale)
 
+def init_object_transformer():
+    dec_layers=3
+    hidden_dim=256
+    nhead=8
+    num_decoder_layers=3
+    dim_feedforward=1024
+    dropout=0.
+    activation="relu"
+    normalize_before=True
+    return_intermediate_dec=False
+    query_dim = 2
+    return Transformer(hidden_dim, nhead, num_decoder_layers, dim_feedforward, dropout,
+                       activation, normalize_before, return_intermediate_dec, query_dim)
 
-def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max_norm=0.1, logger=None):
+def init_v2w_transformer(rt_detr, object_transformer):
+    return V2W_Transformer(rt_detr, object_transformer)
+
+
+def train_one_epoch(model, criterion_rt_detr, criterion_obj_tf, data_loader, optimizer, device, epoch, max_norm=0.1, logger=None):
     model.train()
-    criterion.train()
+    criterion_rt_detr.train()
+    criterion_obj_tf.train()
 
     loss_total = []
+    loss_obj_rt = []
+    loss_boxL1_rt = []
+    loss_giou_rt = []
     loss_obj = []
     loss_boxL1 = []
     loss_giou = []
@@ -114,15 +142,18 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
             labels_mask = labels_mask.to(device)
             target = [{k: v.to(device) for k, v in dict_t.items()} for dict_t in target]
 
-            outputs = model(images, targets=target, query=queries, query_mask=queries_mask)
-            # loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
-            loss_dict = criterion(outputs, target)
+            outputs, outputs2 = model(images, targets=target, query=queries, query_mask=queries_mask)
+            loss_dict = criterion_rt_detr(outputs, target)
+            loss_dict_2 = criterion_obj_tf(outputs2, labels, queries_mask, labels_mask)
             
-            losses = sum(v for v in loss_dict.values())
+            losses = sum(v for v in loss_dict.values()) + sum(v for v in loss_dict_2.values())
             loss_total.append(losses.item())
-            loss_obj.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_labels' in k).item())
-            loss_boxL1.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_bbox' in k).item())
-            loss_giou.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_giou' in k).item())
+            loss_obj_rt.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_labels' in k).item())
+            loss_boxL1_rt.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_bbox' in k).item())
+            loss_giou_rt.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_giou' in k).item())
+            loss_obj.append(sum(loss_dict_2[k] for k in loss_dict_2.keys() if 'loss_bce' in k).item())
+            loss_boxL1.append(sum(loss_dict_2[k] for k in loss_dict_2.keys() if 'loss_bbox' in k).item())
+            loss_giou.append(sum(loss_dict_2[k] for k in loss_dict_2.keys() if 'loss_giou' in k).item())
             tqdm_str = {"Loss": f"{round(sum(loss_total)/len(loss_total) ,3)}",
                         "Loss Obj": f"{round(sum(loss_obj)/len(loss_obj), 3)}",
                         "Loss BoxL1": f"{round(sum(loss_boxL1)/len(loss_boxL1), 3)}",
@@ -152,15 +183,16 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, max
 
 
 @torch.no_grad()
-def evaluate(model, criterion, data_loader, device, epoch, logger=None):
+def evaluate(model, criterion_rt_detr, criterion_obj_tf, data_loader, device, epoch, logger=None):
     model.eval()
-    criterion.eval()
+    criterion_rt_detr.train()
+    criterion_obj_tf.train()
 
     loss_total = []
-    loss_obj = []
-    loss_boxL1 = []
-    loss_giou = []
-    ap_metric = torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type="bbox")
+    loss_obj_rt, loss_boxL1_rt, loss_giou_rt = [], [], []
+    loss_obj, loss_boxL1, loss_giou = [], [], []
+    ap_metric_rt_detr = torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type="bbox")
+    ap_metric_obj = torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type="bbox")
     with tqdm(data_loader, desc=str(f"Val - Epoch {epoch}").ljust(16), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name, target in pbar:
             images = images.to(device)
@@ -171,15 +203,19 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
             labels_mask = labels_mask.to(device)
             target = [{k: v.to(device) for k, v in dict_t.items()} for dict_t in target]
 
-            outputs = model(images, targets=target, query=queries, query_mask=queries_mask)
+            outputs, outputs2 = model(images, targets=target, query=queries, query_mask=queries_mask)
             # loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
-            loss_dict = criterion(outputs, target)
+            loss_dict = criterion_rt_detr(outputs, target)
+            loss_dict_2 = criterion_obj_tf(outputs2, labels, queries_mask, labels_mask)
 
-            losses = sum(v for v in loss_dict.values())
+            losses = sum(v for v in loss_dict.values()) + sum(v for v in loss_dict_2.values())
             loss_total.append(losses.item())
-            loss_obj.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_labels' in k).item())
-            loss_boxL1.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_bbox' in k).item())
-            loss_giou.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_giou' in k).item())
+            loss_obj_rt.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_labels' in k).item())
+            loss_boxL1_rt.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_bbox' in k).item())
+            loss_giou_rt.append(sum(loss_dict[k] for k in loss_dict.keys() if 'loss_giou' in k).item())
+            loss_obj.append(sum(loss_dict_2[k] for k in loss_dict_2.keys() if 'loss_bce' in k).item())
+            loss_boxL1.append(sum(loss_dict_2[k] for k in loss_dict_2.keys() if 'loss_bbox' in k).item())
+            loss_giou.append(sum(loss_dict_2[k] for k in loss_dict_2.keys() if 'loss_giou' in k).item())
             tqdm_str = {"Loss": f"{round(sum(loss_total)/len(loss_total) ,3)}",
                         "Loss Obj": f"{round(sum(loss_obj)/len(loss_obj), 3)}",
                         "Loss BoxL1": f"{round(sum(loss_boxL1)/len(loss_boxL1), 3)}",
@@ -187,21 +223,26 @@ def evaluate(model, criterion, data_loader, device, epoch, logger=None):
             pbar.set_postfix(tqdm_str)
 
             preds, target = prepare_ap_data(outputs, labels, labels_mask)
-            ap_metric.update(preds, target)
+            ap_metric_rt_detr.update(preds, target)
+            preds, target = prepare_ap_data(outputs2, labels, labels_mask, apply_sigmoid=False)
+            ap_metric_obj.update(preds, target)
             if logger is not None:
-                pass
-                #logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
+                logger.computeStats(outputs2, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
 
     if logger is not None:
         results = {"loss_total": sum(loss_total)/len(loss_total), "loss_obj": sum(loss_obj)/len(loss_obj),
                 "loss_boxL1": sum(loss_boxL1)/len(loss_boxL1), "loss_giou": sum(loss_giou)/len(loss_giou)}
         logger.updateLosses(results, epoch, 'val')
-        print()
-        pprint(ap_metric.compute())
-        # logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
-        # ap50 = logger.print_mAP50(mode='val')
-        # logger.print_mAP50_95(mode="val")
-        # results['AP50'] = ap50
+        logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
+        ap50 = logger.print_mAP50(mode='val')
+        logger.print_mAP50_95(mode="val")
+        results['AP50'] = ap50
+        ap_detr = ap_metric_rt_detr.compute()
+        ap_obj = ap_metric_obj.compute()
+        print("RT-DETR: ".ljust(15), ("AP@50: " + str(round(ap_detr["map_50"].item(), 3))).ljust(15), 
+              ("AP@[50,95]: " + str(round(ap_detr["map"].item(), 3))).ljust(15))
+        print("Objects: ".ljust(15), ("AP@50: " + str(round(ap_obj["map_50"].item(), 3))).ljust(15), 
+              ("AP@[50,95]: " + str(round(ap_obj["map"].item(), 3))).ljust(15))
         return results
     else:
         return None
@@ -232,16 +273,13 @@ if distributed:
     path_to_dataset = "/data/mkreis/dataset2/dataset.yaml"
 
 # Loss
-bce_loss_coef = 1
-bbox_loss_coef = 2
-giou_loss_coef = 5
 aux_loss = True
 dec_layers = 6
 
 # Optimizer / DataLoader
 lr = 2e-4
 lr_backbone = 1e-5
-batch_size=4
+batch_size=8
 if distributed:
     batch_size = 8*torch.cuda.device_count()
 weight_decay=1e-3
@@ -257,9 +295,11 @@ if distributed:
 backbone = init_backbone()
 encoder = init_hybrid_encoder()
 decoder = init_decoder(aux_loss, dec_layers)
-model = init_rt_detr(backbone, encoder, decoder)
-model.to(device)
+rt_detr = init_rt_detr(backbone, encoder, decoder)
+obj_tf = init_object_transformer()
+model = init_v2w_transformer(rt_detr, obj_tf)
 
+model.to(device)
 
 model_without_ddp = model
 if distributed:
@@ -271,17 +311,9 @@ if distributed:
 n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print('number of params:', n_parameters)
 
-# Init Loss
-# weight_dict = {'loss_bce': bce_loss_coef, 'loss_bbox': bbox_loss_coef}
-# weight_dict['loss_giou'] = giou_loss_coef
-# if aux_loss:
-#     aux_weight_dict = {}
-#     for i in range(dec_layers - 1):
-#         aux_weight_dict.update({k + f'_{i}': v for k, v in weight_dict.items()})
-#     weight_dict.update(aux_weight_dict)
-# losses = ['labels', 'boxes']
-# criterion = SetCriterion(weight_dict, losses)
-criterion = init_obj_det_critetion()
+# Init Losses
+criterion_rt_detr = init_obj_det_critetion()
+criterion_obj_tf = init_obj_tf_criterion()
 
 # Init Optim
 param_dicts = [
@@ -322,42 +354,50 @@ logger = BasicLogger()
 print("Start training")
 start_time = time.time()
 best_ap = -1
+best_loss = math.inf
 best_epoch = -1
 for epoch in range(start_epoch, epochs):
     logger.resetStats() # clear logger for new epoch
 
     # training
-    train_results = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, clip_max_norm, logger)
+    train_results = train_one_epoch(model, criterion_rt_detr, criterion_obj_tf, data_loader_train, optimizer, device, epoch, clip_max_norm, logger)
     lr_scheduler.step()
 
     # validation
-    val_results = evaluate(model, criterion, data_loader_val, device, epoch, logger)
+    val_results = evaluate(model, criterion_rt_detr, criterion_obj_tf, data_loader_val, device, epoch, logger)
 
     if output_dir:
         if not os.path.isdir(output_dir):
             os.makedirs(output_dir, exist_ok=True)
         logger.saveLossLogs(output_dir)
-        # logger.saveStatsLogs(output_dir, epoch)
+        logger.saveStatsLogs(output_dir, epoch)
         logger.plotLoss(output_dir)
-        save_on_master({
-            'model': model_without_ddp.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'lr_scheduler': lr_scheduler.state_dict(),
-            'epoch': epoch,
-        }, os.path.join(output_dir, "best.pth"))
-        # if val_results["AP50"] > best_ap:
-        #     print("Saved new model as best.pht")
-        #     logger.plotPRCurve(path=output_dir, mode='val')
-        #     logger.plotConfusionMat(path=output_dir, thresh = 0.5, mode='val')
-        #     logger.plotPRCurveDet(path=output_dir, mode="val")
-        #     best_ap = val_results["AP50"]
-        #     best_epoch = epoch
-        #     save_on_master({
-        #         'model': model_without_ddp.state_dict(),
-        #         'optimizer': optimizer.state_dict(),
-        #         'lr_scheduler': lr_scheduler.state_dict(),
-        #         'epoch': epoch,
-        #     }, os.path.join(output_dir, "best.pth"))
+        if val_results["AP50"] > best_ap:
+            print("Saved new model as best_ap.pht")
+            logger.plotPRCurve(path=output_dir, mode='val')
+            logger.plotConfusionMat(path=output_dir, thresh = 0.5, mode='val')
+            logger.plotPRCurveDet(path=output_dir, mode="val")
+            best_ap = val_results["AP50"]
+            best_epoch = epoch
+            save_on_master({
+                'model': model_without_ddp.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+                'epoch': epoch,
+            }, os.path.join(output_dir, "best_ap.pth"))
+        if val_results["loss_total"] < best_loss:
+            print("Saved new model as best_loss.pht")
+            logger.plotPRCurve(path=output_dir, mode='val')
+            logger.plotConfusionMat(path=output_dir, thresh = 0.5, mode='val')
+            logger.plotPRCurveDet(path=output_dir, mode="val")
+            best_loss = val_results["total_loss"]
+            save_on_master({
+                'model': model_without_ddp.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+                'epoch': epoch,
+            }, os.path.join(output_dir, "best_loss.pth"))
+
 
 
 total_time = time.time() - start_time
