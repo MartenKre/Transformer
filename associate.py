@@ -55,14 +55,14 @@ def init_backbone():
 
 
 def init_decoder(aux_loss, dec_layers):
-    num_classes=80  # unused
+    num_classes=1  
     hidden_dim=256
-    num_queries=300 # unused
+    num_queries=100 
     position_embed_type='sine'
     feat_channels=[256, 256, 256]
     feat_strides=[8, 16, 32]
     num_levels=3
-    num_decoder_points=8    # default 4
+    num_decoder_points=4    # default 4
     nhead=8
     num_decoder_layers=dec_layers
     dim_feedforward=1024
@@ -169,19 +169,19 @@ def get_colors(pred_obj, conf_thresh):
     return color_arr
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "training_results/rt-detr/run1/best.pth"
+path_to_weights = "training_results/rt_detr_obj_only/run1/best.pth"
 
-# path_to_video = "/home/marten/Uni/Semester_4/src/TestData/955_2.avi"
-# path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
+path_to_video = "/home/marten/Uni/Semester_4/src/TestData/955_2.avi"
+path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt"
 # path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
 # path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
 # path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi"
 # path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt"
-path_to_video = "../TestData/videos_from_training/19_2.avi"
-path_to_imu = "../TestData/videos_from_training/furuno_19.txt"
+# path_to_video = "../TestData/videos_from_training/19_2.avi"
+# path_to_imu = "../TestData/videos_from_training/furuno_19.txt"
 
 # General settings
-conf_thresh = .5    # threshhold of objectness pred -> only queries with pred_conf >= conf_thresh will be visualized
+conf_thresh = .8    # threshhold of objectness pred -> only queries with pred_conf >= conf_thresh will be visualized
 resize_coeffs = [0.5, 0.5] # applied to image before inference, 0 -> x, 1 -> y
 
 # Init Model
@@ -218,41 +218,30 @@ while cap.isOpened():
         break  # End of video
 
     # preprocess data (create image & query tensor)
-    imu_curr = imu_data[frame_id]
-    ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
-    if buoyGTData.checkForRefresh(*ship_pose[0:2]):
-        buoys_on_tile = buoyGTData.getBuoyLocations(*ship_pose[0:2])
-    buoys_filtered = filterBuoys(ship_pose, buoys_on_tile)
-    queries = torch.tensor(createQueryData(ship_pose, buoys_filtered), dtype=torch.float32)[...,0:2]
+    # imu_curr = imu_data[frame_id]
+    # ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
+    # if buoyGTData.checkForRefresh(*ship_pose[0:2]):
+    #     buoys_on_tile = buoyGTData.getBuoyLocations(*ship_pose[0:2])
+    # buoys_filtered = filterBuoys(ship_pose, buoys_on_tile)
+    # queries = torch.tensor(createQueryData(ship_pose, buoys_filtered), dtype=torch.float32)[...,0:2]
 
     colors = []
-    if queries.numel() > 0: # if no queries could be generated -> skip inference
-        if queries.ndim == 1:
-            queries = queries.unsqueeze(0)
-        # normalize query inputs (dist and angle)
-        queries[..., 0] = queries[..., 0] / 1000
-        queries[..., 1] = queries[..., 1] / 180
+    img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
+    img = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1) / 255    # standardizes img data & converts to 3xHxW
 
-        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (0,0), fx=resize_coeffs[0], fy=resize_coeffs[1])
-        img = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1) / 255    # standardizes img data & converts to 3xHxW
+    # add batch dims
+    img = img.unsqueeze(0).to(device)
 
-        # add batch dims
-        queries = queries.unsqueeze(0).to(device)
-        queries_mask = torch.full((1,queries.size(dim=1)), fill_value=True).to(device)
-        img = img.unsqueeze(0).to(device)
-
-        with torch.no_grad():
-            outputs = model(img, query=queries, query_mask=queries_mask)
-        outputs = postprocess(outputs, target_size=[frame.shape[0], frame.shape[1]])  # convert boxes from cxcyhw -> xyxy w.r.t. original image size
-        pred_obj = outputs['objectness'].cpu().detach()
-        pred_boxes = outputs['boxes'][pred_obj>=conf_thresh].cpu().detach()    # filter boxes based on objectness thresh
-        colors = get_colors(pred_obj, conf_thresh)
-        draw_boxes(frame, pred_boxes, pred_obj[pred_obj>=conf_thresh], colors)     # draw bbs with conf as text
+    with torch.no_grad():
+        outputs = model(img, targets=None, query=None, query_mask=None)
+    outputs = postprocess(outputs, target_size=[frame.shape[0], frame.shape[1]])  # convert boxes from cxcyhw -> xyxy w.r.t. original image size
+    pred_obj = outputs['objectness'].cpu()
+    pred_boxes = outputs['boxes'][pred_obj>=conf_thresh].cpu()    # filter boxes based on objectness thresh
+    colors = get_colors(pred_obj, conf_thresh)
+    draw_boxes(frame, pred_boxes, pred_obj[pred_obj>=conf_thresh], colors)     # draw bbs with conf as text
 
     cv2.imshow("Buoy Association Transformer", frame)
-    if frame_id % 8 == 0:
-        live_plotting(plt, ax, queries, colors)
     frame_id += 1
 
     key = cv2.waitKey(1)

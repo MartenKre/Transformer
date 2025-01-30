@@ -20,3 +20,4 @@ experiment-*
 not_tracked_dir/
 .vscode
 *description.txt
+*training_results/
