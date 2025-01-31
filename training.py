@@ -390,7 +390,7 @@ for epoch in range(start_epoch, epochs):
             logger.plotPRCurve(path=output_dir, mode='val')
             logger.plotConfusionMat(path=output_dir, thresh = 0.5, mode='val')
             logger.plotPRCurveDet(path=output_dir, mode="val")
-            best_loss = val_results["total_loss"]
+            best_loss = val_results["loss_total"]
             save_on_master({
                 'model': model_without_ddp.state_dict(),
                 'optimizer': optimizer.state_dict(),
