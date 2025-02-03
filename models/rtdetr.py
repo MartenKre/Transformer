@@ -32,7 +32,7 @@ class RTDETR(nn.Module):
         x = self.encoder(x)        
         x, mem = self.decoder(x, targets)
     
-        return x, mem
+        return x, mem.detach()
     
     def deploy(self, ):
         self.eval()

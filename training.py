@@ -22,7 +22,7 @@ from pprint import pprint
 import torchmetrics
 
 def init_obj_det_critetion():
-    weight_dict_loss = {"loss_labels": 20, "loss_bbox": 5, "loss_giou": 2}
+    weight_dict_loss = {"loss_labels": 100, "loss_bbox": 5, "loss_giou": 2}
     losses = ["labels", "boxes"]
     weight_dict_matcher = {"cost_class": 2, "cost_bbox": 5, "cost_giou": 2}
     matcher = HungarianMatcher(weight_dict_matcher)
@@ -203,7 +203,7 @@ def evaluate(model, criterion_rt_detr, criterion_obj_tf, data_loader, device, ep
             labels_mask = labels_mask.to(device)
             target = [{k: v.to(device) for k, v in dict_t.items()} for dict_t in target]
 
-            outputs, outputs2 = model(images, targets=target, query=queries, query_mask=queries_mask)
+            outputs, outputs2 = model(images, targets=None, query=queries, query_mask=queries_mask)
             # loss_dict = criterion(outputs, labels, queries_mask, labels_mask)
             loss_dict = criterion_rt_detr(outputs, target)
             loss_dict_2 = criterion_obj_tf(outputs2, labels, queries_mask, labels_mask)
@@ -236,9 +236,9 @@ def evaluate(model, criterion_rt_detr, criterion_obj_tf, data_loader, device, ep
         logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
         ap50 = logger.print_mAP50(mode='val')
         logger.print_mAP50_95(mode="val")
-        results['AP50'] = ap50
         ap_detr = ap_metric_rt_detr.compute()
         ap_obj = ap_metric_obj.compute()
+        results['AP50'] = ap_detr["map_50"].item()
         print("RT-DETR: ".ljust(15), ("AP@50: " + str(round(ap_detr["map_50"].item(), 3))).ljust(15), 
               ("AP@[50,95]: " + str(round(ap_detr["map"].item(), 3))).ljust(15))
         print("Objects: ".ljust(15), ("AP@50: " + str(round(ap_obj["map_50"].item(), 3))).ljust(15), 

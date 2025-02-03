@@ -106,13 +106,15 @@ class SetCriterion(nn.Module):
         # Compute all the requested losses
         losses = {}
         for loss in self.losses:
-            losses.update(self.get_loss(loss, outputs_without_aux, labels, queries_mask, labels_mask, num_q, num_l))
+            l_dict = self.get_loss(loss, outputs_without_aux, labels, queries_mask, labels_mask, num_q, num_l)
+            losses = {k: l_dict[k] * self.weight_dict[k] for k in l_dict if k in self.weight_dict}
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if 'aux_outputs' in outputs:
             for i, aux_outputs in enumerate(outputs['aux_outputs']):
                 for loss in self.losses:
                     l_dict = self.get_loss(loss, aux_outputs, labels, queries_mask, labels_mask, num_q, num_l)
+                    l_dict = {k: l_dict[k] * self.weight_dict[k] for k in l_dict if k in self.weight_dict}
                     l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
                     losses.update(l_dict)
 

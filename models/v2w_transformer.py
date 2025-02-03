@@ -24,7 +24,7 @@ class Transformer(nn.Module):
     def __init__(self, d_model=256, nhead=8,
                  num_decoder_layers=3, dim_feedforward=1024, dropout=0.1,
                  activation="relu", normalize_before=False,
-                 return_intermediate_dec=False, query_dim=2):
+                 return_intermediate_dec=True, query_dim=2):
         super().__init__()
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
@@ -54,9 +54,21 @@ class Transformer(nn.Module):
         hs = self.decoder(query_embed, memory, tgt_key_padding_mask=query_mask)[0].permute(1, 0, 2)
 
         bbox_pred = self.bbox_embed(hs).sigmoid()
-        obj_logis = self.objectness_embed(hs).sigmoid().squeeze(-1)
-        out = {"pred_logits": obj_logis, "pred_boxes": bbox_pred}
+        obj_logis = self.objectness_embed(hs).sigmoid().squeeze()
+        out = {"pred_logits": obj_logis[-1], "pred_boxes": bbox_pred[-1]}
+        if self.return_intermediate_dec:
+            out['aux_outputs'] = self._set_aux_loss(obj_logis, bbox_pred)
+
         return out
+
+
+    @torch.jit.unused
+    def _set_aux_loss(self, outputs_class, outputs_coord):
+        # this is a workaround to make torchscript happy, as torchscript
+        # doesn't support dictionary with non-homogeneous values, such
+        # as a dict having both a Tensor and a list.
+        return [{'pred_logits': a, 'pred_boxes': b}
+                for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
 
 
 class TransformerDecoder(nn.Module):
