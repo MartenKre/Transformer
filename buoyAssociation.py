@@ -6,6 +6,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import threading
 import time
+import random
 from collections import defaultdict
 from scipy.optimize import linear_sum_assignment, minimize
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -85,49 +86,6 @@ class BuoyAssociation():
         return outputs
 
 
-    def BuoyLocationPred(self, frame_id, preds):
-        """for each BB prediction function computes the Buoy Location based on Dist & Angle of the tensor
-        Args:
-            frame_id: ID of current frame
-            preds: prediction tensor of yolov7 (N,8) -> [Nx[xyxy, conf, cls, dist, angle]]
-        Returns:
-            Dict{"ship:"[lat,lng,heading], "buoy_prediction":[[lat1,lng1],[lat2,lng2]]}
-        """
-
-        latCam = self.imu_data[frame_id][3]
-        lngCam = self.imu_data[frame_id][4]
-        if self.use_biases:
-            heading_bias = self.computeEma(self.heading_bias)
-            heading = self.imu_data[frame_id][2] - np.rad2deg(heading_bias)
-        else:
-            heading = self.imu_data[frame_id][2]
-
-        # trasformation:    latlng to ecef, ecef to enu, enu to ship
-        x, y, z = LatLng2ECEF(latCam, lngCam)  # ship coords in ECEF
-        ECEF_T_Ship = T_ECEF_Ship(x,y,z,heading)   # transformation matrix between ship and ecef
-
-        # compute 2d points (x,y) in ship cs, (z=0, since all objects are on water surface)
-        buoysX = (torch.cos(preds[:,7]) * preds[:,6]).tolist()
-        buoysY = (torch.sin(preds[:,7]) * preds[:,6]).tolist()
-        buoy_preds = list(zip(buoysX, buoysY))
-
-        # transform buoyCoords to lat lng
-        buoysLatLng = []
-        for buoy in buoy_preds:
-            p = ECEF_T_Ship @ np.array([buoy[0], buoy[1], 0, 1])    # buoy coords in ecef
-            lat, lng, alt = ECEF2LatLng(p[0],p[1],p[2])
-            buoysLatLng.append((lat, lng))
-
-        return {"buoy_predictions": buoysLatLng, "ship": [latCam, lngCam, heading]}
-
-    def getLabelsData(self, labels_dir, image_path):
-        labelspath = os.path.join(labels_dir, os.path.basename(image_path) + ".json")
-        if os.path.exists(labelspath):
-            return self.distanceEstimator.LabelsJSONFormat(labelspath)
-        else:
-            print(f"LablesFile not found: {labelspath}")
-            return []
-        
     def getIMUData(self, path):
         # function returns IMU data as list
 
@@ -154,24 +112,13 @@ class BuoyAssociation():
                 print("No IMU data found, check path: {path}")
         return result
     
+
     def initBoxMOT(self):
         return ByteTrack(
             track_thresh=2 * self.conf_thresh,      # threshold for detection confidence -> seperates BBs into high and low confidence
             match_thresh=0.99,                  # matching thresh -> controls max dist allowed between tracklets & detections for a match
             track_buffer=self.track_buffer      # number of frames to keep a track alive after it was last detected
         )
-
-
-    def create_run_directory(self, base_name="run", path=""):
-        i = 0
-        while True:
-            folder_name = f"{base_name}{i if i > 0 else ''}"
-            if not os.path.exists(os.path.join(path, folder_name)):
-                path_to_folder = os.path.join(path, folder_name)
-                os.makedirs(path_to_folder)
-                print(f"Created directory: {path_to_folder} to store plots")
-                return path_to_folder
-            i += 1
 
 
     def displayFPS(self, frame, prev_frame_time):
@@ -191,7 +138,7 @@ class BuoyAssociation():
         # draws BBs that are above self.conf_thresh
         for bb,conf,clr in zip(boxes,confs,colors):
             txt = str(round(conf.item(), 3))
-            if conf > self.conf_thresh:
+            if conf >= self.conf_thresh:
                 clr = [x*255 for x in clr]
                 clr = [clr[2], clr[1], clr[0], clr[3]]
                 plot_one_box(bb, frame, color=clr, label=txt)
@@ -213,12 +160,15 @@ class BuoyAssociation():
                     (128/255, 128/255, 0, 1)]
 
         color_arr = []
-        for i, x in enumerate(filtered_buoys):
+        for x in filtered_buoys:
             x = self.Coords2Hash(x)
             if x in self.color_dict:
                 color_arr.append(self.color_dict[x])
             else:
-                clr = color_table[i%len(color_table)]
+                if len(self.color_dict) < len(color_table):
+                    clr = list(set(color_table).difference(set([clr for clr in self.color_dict.values()])))[0]
+                else:
+                    clr = color_table[random.randint(0, len(color_table)-1)]
                 self.color_dict[x] = clr
                 color_arr.append(clr)
         return color_arr
@@ -243,6 +193,7 @@ class BuoyAssociation():
             processing_thread.start()
             # start rendering
             self.RenderObj.run()
+
 
     def processVideo(self, video_path, imu_path, rendering, lock=None):     
         # function computes predictions, and performs matching for each frame of video
@@ -306,6 +257,12 @@ class BuoyAssociation():
                     pred_obj = outputs['objectness'].cpu().detach()
                     pred_boxes = outputs['boxes'].cpu().detach()    # filter boxes based on objectness thresh
                     self.draw_boxes(frame, pred_boxes, pred_obj, color_arr)     # draw bbs with conf as text
+
+                    # remove color for unmatched query buoys (filterd_buoys) from color_dict_gt
+                    for i, conf in enumerate(pred_obj):
+                        if conf < self.conf_thresh:
+                            del color_dict_gt[i]
+
                 else:
                     self.color_dict = {}    # reset global color dict (to reduce mem)
 
@@ -357,6 +314,6 @@ ba = BuoyAssociation()
 # imu_dir = os.path.join(test_folder, 'imu') 
 # ba.test(images_dir, imu_dir)
 
-ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/955_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt", rendering=True)
+# ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/955_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt", rendering=True)
 # ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/videos_from_training/19_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_19.txt", rendering=True)
-# ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/22_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt", rendering=True)
+ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/22_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt", rendering=True)
