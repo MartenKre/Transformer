@@ -24,16 +24,16 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 class BuoyAssociation():    
-    def __init__(self, device_model="cuda", img_sz=[1920, 1080]):
+    def __init__(self, device_model="cuda", img_sz=[1920, 1080], path_to_weights="training_results/run_MLP10_newMet/best.pth"):
         self.image_size = img_sz
-        self.resize_coeffs = [0.5, 0.5] # applied to image before inference, 0 -> x, 1 -> y
-        self.conf_thresh = 0.25  # BBs below this threshhold won't be plotted
+        self.resize_coeffs = [0.5, 0.5] # applied to video frame prior to inference, 0 -> width, 1 -> height 
+        self.conf_thresh = 0.9          # BBs below this threshhold won't be plotted
 
         self.model = init_V2W_Transformer(lr_backbone=1e-5, hidden_dim=256, dropout=.1, nheads=8, dim_feedforward=2048,
                                           enc_layers=6, dec_layers=6, pre_norm=True, aux_loss=False, use_embeddings=False)
-        device = torch.device(device_model) if torch.cuda.is_available() else torch.device('cpu')
+        self.device = torch.device(device_model) if torch.cuda.is_available() else torch.device('cpu')
+        self.loadWeights(path_to_weights)
         self.model.eval()
-        self.model.to(device)
 
         self.postprocess = PostProcess()
         self.BuoyCoordinates = GetGeoData(tile_size=0.02) # load BuoyData from GeoJson
@@ -45,6 +45,18 @@ class BuoyAssociation():
         self.color_dict = {}
 
 
+    def loadWeights(self, path_to_weights):
+        if not os.path.isfile(path_to_weights):
+            raise ValueError("Invalid Path to Model weights! Check path_to_weights")
+        print("Loading Model Weights...")
+        checkpoint = torch.load(path_to_weights, map_location='cpu')
+        self.model.load_state_dict(checkpoint['model'], strict=True)
+        self.model.to(self.device)
+
+        n_parameters = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print('Number of params:', n_parameters)
+
+
     def getPredictions(self, img, queries, queries_mask, frame_id):
         """Function runs inferense, returns Yolov7 preds concatenated with bearing to Objects & ID of BoxMOT
         Prediction dict contains ship pose and predicted buoy positions (in lat,lng)
@@ -53,13 +65,12 @@ class BuoyAssociation():
             Queries:      Queries Tensor for nearby buoys containing dist and angle
             Queries_mask: Mask for relevant queries (torch.ones tensor in this case)
         Returns:
-            preds: (n,8) tensor [xyxy, conf, cls, dist, angle]
-            pred_dict dict containing "ship": [lat, lng, heading] and "buoy_predictions": [[lat1,lng1], ...]
+            outputs: dict containing preds (objectness and bounding boxes)
         """
 
         with torch.no_grad():
             outputs = self.model(img, queries, queries_mask)
-        outputs = self.postprocess(outputs, target_size=[self.img_sz[1], self.img_sz[0]])  # convert boxes from cxcyhw -> xyxy w.r.t. original image size
+        outputs = self.postprocess(outputs, target_size=[self.image_size[1], self.image_size[0]])  # convert boxes from cxcyhw -> xyxy w.r.t. original image size
         
         # BoxMOT tracking on predictions
         # preds_boxmot_format = pred[:,0:6]    # preds need to be in format [xyxy, conf, classID]
@@ -181,7 +192,9 @@ class BuoyAssociation():
         for bb,conf,clr in zip(boxes,confs,colors):
             txt = str(round(conf.item(), 3))
             if conf > self.conf_thresh:
-             plot_one_box(bb, frame, color=clr, label=txt)
+                clr = [x*255 for x in clr]
+                clr = [clr[2], clr[1], clr[0], clr[3]]
+                plot_one_box(bb, frame, color=clr, label=txt)
 
     
     def Coords2Hash(self, coords):
@@ -226,7 +239,7 @@ class BuoyAssociation():
             heading_start = self.imu_data[0][2]
             self.RenderObj.initTransformations(lat_start, lng_start, heading_start) # initialize Transformation Matrices with pos & heading of first frame
             # start thread to run video processing 
-            processing_thread = threading.Thread(target=self.processVideo, args=(video_path, imu_path, rendering, True, lock), daemon=True)
+            processing_thread = threading.Thread(target=self.processVideo, args=(video_path, imu_path, rendering, lock), daemon=True)
             processing_thread.start()
             # start rendering
             self.RenderObj.run()
@@ -238,6 +251,7 @@ class BuoyAssociation():
         self.imu_data = self.getIMUData(imu_path)
 
         # load geodata
+        ship_pose = [self.imu_data[0][3],self.imu_data[0][4],self.imu_data[0][2]]
         buoys_on_tile = self.BuoyCoordinates.getBuoyLocations(*ship_pose[0:2])
         newBuoyCoords = threading.Event()   # event that new data has arrived from thread
         results_list = []
@@ -266,7 +280,7 @@ class BuoyAssociation():
                 ship_pose = [imu_curr[3],imu_curr[4],imu_curr[2]]
                 buoys_filtered = filterBuoys(ship_pose, buoys_on_tile)
                 color_arr = self.get_colors(buoys_filtered)
-                color_dict_gt = {i:(color[0]/255, color[1]/255, color[2]/255, color[3]/255) for i, color in enumerate(color_arr)}
+                color_dict_gt = {i:color for i, color in enumerate(color_arr)}
                 queries = torch.tensor(createQueryData(ship_pose, buoys_filtered), dtype=torch.float32)[...,0:2]
 
                 if queries.numel() > 0: # if no queries could be generated -> skip inference
