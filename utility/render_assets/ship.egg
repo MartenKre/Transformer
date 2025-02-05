@@ -1,0 +1,304 @@
+<CoordinateSystem> { Z-Up }
+
+<Comment> {
+  "bam2egg ship2.bam ship.egg"
+}
+<Material> Material {
+  <Scalar> baser { 0.00912471953779459 }
+  <Scalar> baseg { 0.00476710265502334 }
+  <Scalar> baseb { 0.800031542778015 }
+  <Scalar> emitr { 0 }
+  <Scalar> emitg { 0 }
+  <Scalar> emitb { 0 }
+  <Scalar> emita { 0 }
+  <Scalar> roughness { 0.5 }
+  <Scalar> metallic { 0 }
+  <Scalar> ior { 1.5 }
+  <Scalar> local { 0 }
+}
+<VertexPool> Scene {
+  <Vertex> 0 {
+    -1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 -1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 1 {
+    0 2 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 -1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 2 {
+    0 0 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 -1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 3 {
+    1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 -1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 4 {
+    1 -1 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 5 {
+    1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 6 {
+    0 2 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 7 {
+    0 2 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 8 {
+    -1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 9 {
+    0 2 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 10 {
+    0 0 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 11 {
+    -1 -1 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 12 {
+    -1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 13 {
+    0 0 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 14 {
+    0 0 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 15 {
+    1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 16 {
+    1 -1 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 17 {
+    -1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { -0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 18 {
+    -1 -1 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { -0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 19 {
+    0 2 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { -0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 20 {
+    0 2 0
+    <UV> 0 { 0 0 }
+    <Normal> { -0.948693335056305 0.316197752952576 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 21 {
+    0 2 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 22 {
+    -1 -1 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 23 {
+    0 0 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { 0 0 1 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 24 {
+    1 -1 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { -0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 25 {
+    0 0 0.100000001490116
+    <UV> 0 { 0 0 }
+    <Normal> { -0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 26 {
+    0 0 0
+    <UV> 0 { 0 0 }
+    <Normal> { -0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+  <Vertex> 27 {
+    1 -1 0
+    <UV> 0 { 0 0 }
+    <Normal> { -0.707106828689575 -0.707106828689575 0 }
+    <RGBA> { 1 1 1 1 }
+  }
+}
+<Group> Cube {
+  <Group> Cube {
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 0 1 2 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 1 3 2 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 4 5 6 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 4 6 7 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 8 8 9 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 8 9 9 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 10 10 8 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 10 8 8 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 11 12 13 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 11 13 14 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 15 15 10 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 15 10 10 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 16 16 15 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 16 15 15 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 17 18 19 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 17 19 20 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 9 9 21 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 9 21 21 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 22 22 8 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 22 8 8 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 21 21 22 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 21 22 22 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 22 23 21 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 23 16 21 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 24 25 26 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 24 26 27 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 23 23 16 <Ref> { Scene } }
+    }
+    <Polygon> {
+      <MRef> { Material }
+      <VertexRef> { 23 16 16 <Ref> { Scene } }
+    }
+  }
+}
