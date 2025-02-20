@@ -4,6 +4,8 @@ import time
 import math
 import sys
 from tqdm import tqdm
+import torchmetrics
+from pprint import pprint
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader
@@ -45,9 +47,30 @@ def init_transformer(hidden_dim, dropout, nheads, dim_feedforward, enc_layers, d
     )
 
 
+def prepare_ap_data(outputs, labels, labels_mask):
+    src_boxes = outputs['pred_boxes']
+    src_logits = outputs['pred_logits']
+    labels = labels[..., 1:]
+    preds = []
+    target = []
+    batch_size=src_boxes.size(0)
+    for i in range(0, batch_size):
+        dct = {"boxes": src_boxes[i],
+               "scores": src_logits[i],
+               "labels": torch.zeros_like(src_logits[i], device=src_logits.device, dtype=int)}
+        preds.append(dct)
+
+        dct2 = {"boxes": labels[i][labels_mask[i]],
+                "labels": torch.zeros((labels_mask[i].sum()), device=labels_mask.device, dtype=int)}
+        target.append(dct2)
+
+    return preds, target
+
+
 @torch.no_grad()
 def test(model, data_loader, device, logger=None):
     model.eval()
+    # ap_metric=torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type='bbox')
 
     with tqdm(data_loader, desc=str(f"Test").ljust(8), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
@@ -60,6 +83,8 @@ def test(model, data_loader, device, logger=None):
 
             outputs = model(images, queries, queries_mask)
 
+            # preds, target = prepare_ap_data(outputs, labels, labels_mask)
+            # ap_metric.update(preds, target)
             if logger is not None:
                 logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
 
@@ -67,6 +92,8 @@ def test(model, data_loader, device, logger=None):
         logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
         ap50 = logger.print_mAP50(mode='val')
         logger.print_mAP50_95(mode="val")
+        # res = ap_metric.compute()
+        # pprint(res)
         return ap50
     else:
         return None
@@ -101,7 +128,7 @@ path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/T
 aux_loss = False
 
 # Optimizer / DataLoader
-batch_size=4
+batch_size=8
 weight_decay=1e-3
 epochs=120
 lr_drop=65
