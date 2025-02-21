@@ -1,3 +1,4 @@
+from collections import defaultdict
 import torch
 import os
 import time
@@ -9,11 +10,12 @@ from pprint import pprint
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader
-from models.detr import DETR, SetCriterion
+from util.box_ops import box_iou, box_cxcywh_to_xyxy
+from models.detr import DETR
 from models.transformer import Transformer
 from models.backbone import Backbone, Joiner
 from models.position_encoding import PositionEmbeddingSine 
-from util.misc import save_on_master, BasicLogger
+from util.misc import BasicLogger
 
 
 def init_position_encoding(hidden_dim):
@@ -66,12 +68,51 @@ def prepare_ap_data(outputs, labels, labels_mask):
 
     return preds, target
 
+def computeIOU(bb_pred, bb_label):
+    bb_pred = box_cxcywh_to_xyxy(bb_pred)
+    bb_label = box_cxcywh_to_xyxy(bb_label)
+    iou = box_iou(bb_pred, bb_label)[0]
+    return torch.diag(iou)
+
+def compute_metrics(outputs, labels, queries_mask, labels_mask, results_dict, iou_thresh=0.5, conf_thresh=0.90):
+    src_logits = outputs['pred_logits'].cpu().detach()     # only get logits, that have corresponding label
+    conf_mask = torch.full(src_logits.shape, fill_value=False)
+    conf_mask[src_logits>=conf_thresh] = True       # mask for conf logits that are greater than thresh
+    bb_filtered = outputs['pred_boxes'][conf_mask & labels_mask].cpu().detach()
+    labels_filtered = labels[conf_mask & labels_mask][...,1:]
+    fp_conf = src_logits[conf_mask & ~labels_mask & queries_mask].numel()
+    fn_conf = src_logits[~conf_mask & labels_mask].numel()  # fp through conf: has corresp label but is below conf level
+    res = computeIOU(bb_filtered, labels_filtered)
+    fp_iou = res[res<iou_thresh].numel()
+    fn_iou = fp_iou
+    tp = res.numel() - fp_iou
+
+    results_dict['tp'] += tp
+    results_dict['fp'] += fp_iou + fp_conf
+    results_dict['fn'] += fn_iou + fn_conf
+    results_dict['IoU'] += res.sum()
+    results_dict['tp_match'] += bb_filtered.size(0)
+
+def print_metrics(metrics):
+    metrics["Precision"] = metrics["tp"] / (metrics["tp"]+ metrics["fp"])
+    metrics["Recall"] = metrics["tp"] / (metrics["tp"]+ metrics["fn"])
+    metrics["F1-Score"] = 2 * metrics["Precision"] * metrics["Recall"] / (metrics["Recall"]+ metrics["Precision"])
+    metrics["Mean-IoU"] = metrics["IoU"] / metrics["tp_match"]
+    for k,v in metrics.items():
+        print(f"{k}:".ljust(6), v)
+
+def print_latency(latency):
+    latency = latency["time"] / latency["count"]
+    print("Latency: ", round(latency), "ms")
+    print("FPS: ", round(1 / (latency/1000), 2))
 
 @torch.no_grad()
 def test(model, data_loader, device, logger=None):
     model.eval()
     # ap_metric=torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type='bbox')
 
+    metrics_dict = defaultdict(float)
+    latency_dict = defaultdict(float)
     with tqdm(data_loader, desc=str(f"Test").ljust(8), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
             images = images.to(device)
@@ -81,12 +122,22 @@ def test(model, data_loader, device, logger=None):
             queries_mask = queries_mask.to(device)
             labels_mask = labels_mask.to(device)
 
+            start_time = time.perf_counter()
             outputs = model(images, queries, queries_mask)
+            latency_dict["time"] += (time.perf_counter() - start_time) * 1000
+            latency_dict["count"] += images.size(0)
 
             # preds, target = prepare_ap_data(outputs, labels, labels_mask)
             # ap_metric.update(preds, target)
+            compute_metrics(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), metrics_dict)
             if logger is not None:
                 logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
+
+    print("Results:")
+    print_metrics(metrics_dict)
+    print()
+    print_latency(latency_dict)
+    print()
 
     if logger is not None:
         logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
@@ -128,7 +179,7 @@ path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/T
 aux_loss = False
 
 # Optimizer / DataLoader
-batch_size=8
+batch_size=1
 weight_decay=1e-3
 epochs=120
 lr_drop=65
@@ -171,7 +222,6 @@ print("Start testing")
 
 logger.resetStats() # clear logger for new epoch
 
-# training
 # validation
 val_results = test(model, data_loader_val, device, logger)
 
