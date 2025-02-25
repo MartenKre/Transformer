@@ -41,12 +41,14 @@ def labelsJSON2Yolo(labels, queries, ship_pose):
     return result 
 
 # Settings:
-mode = 'test' # train or test
+mode = 'train' # train or test
 verbose = True
 resize_imgs = True
 resize_coeffs = [0.5, 0.5]
-target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2"
-data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/"
+# target_dir = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2"
+# data_path = "/home/marten/Uni/Semester_4/src/Trainingdata/labeled/"
+target_dir = "/home/marten/Uni/Semester_4/src/TestData/TestLabeled/Generated_Sets/Transformer"
+data_path = "/home/marten/Uni/Semester_4/src/TestData/TestLabeled/labeled"
 if os.path.exists(os.path.join(target_dir,mode)):
     raise ValueError("Aborting... Specified target dir already exists:", os.path.join(target_dir, mode))
 os.makedirs(target_dir, exist_ok=True)

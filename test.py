@@ -90,7 +90,7 @@ def compute_metrics(outputs, labels, queries_mask, labels_mask, results_dict, io
     results_dict['tp'] += tp
     results_dict['fp'] += fp_iou + fp_conf
     results_dict['fn'] += fn_iou + fn_conf
-    results_dict['IoU'] += res.sum()
+    results_dict['IoU'] += res.sum().item()
     results_dict['tp_match'] += bb_filtered.size(0)
 
 def print_metrics(metrics):
@@ -115,6 +115,7 @@ def test(model, data_loader, device, logger=None):
     latency_dict = defaultdict(float)
     with tqdm(data_loader, desc=str(f"Test").ljust(8), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
+            start_time = time.perf_counter()
             images = images.to(device)
             queries = queries.to(device)
             queries = queries[..., 1:]  # remove index from queries (only for debugging reasons)
@@ -122,8 +123,8 @@ def test(model, data_loader, device, logger=None):
             queries_mask = queries_mask.to(device)
             labels_mask = labels_mask.to(device)
 
-            start_time = time.perf_counter()
             outputs = model(images, queries, queries_mask)
+
             latency_dict["time"] += (time.perf_counter() - start_time) * 1000
             latency_dict["count"] += images.size(0)
 
@@ -173,7 +174,8 @@ use_embeddings = False
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Dataset
-path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/dataset.yaml"
+# path_to_dataset = "/home/marten/Uni/Semester_4/src/Trainingdata/Generated_Sets/Transformer_Dataset2/dataset.yaml"
+path_to_dataset = "/home/marten/Uni/Semester_4/src/TestData/TestLabeled/Generated_Sets/Transformer/dataset.yaml"
 
 # Loss
 aux_loss = False
