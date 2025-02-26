@@ -36,8 +36,8 @@ class DETR(nn.Module):
         if not use_embeddings:
             self.query_embed = MLP(input_dim_gt, hidden_dim//2, hidden_dim, 3) # embedding: (dist,bearing) -> embedding
         else:
-            self.query_embed_1 = nn.Embedding(40, int(hidden_dim/input_dim_gt))
-            self.query_embed_2 = nn.Embedding(80, int(hidden_dim/input_dim_gt))
+            self.query_embed_1 = nn.Embedding(41, int(hidden_dim/input_dim_gt))
+            self.query_embed_2 = nn.Embedding(81, int(hidden_dim/input_dim_gt))
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
