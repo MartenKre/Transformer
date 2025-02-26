@@ -186,8 +186,8 @@ if distributed:
 # Loss
 aux_loss = True
 bce_loss_coef = 1
-bbox_loss_coef = 2
-giou_loss_coef = 5
+bbox_loss_coef = 3
+giou_loss_coef = 7
 
 # Optimizer / DataLoader
 lr = 1e-4
