@@ -61,7 +61,7 @@ def init_decoder(aux_loss, dec_layers):
     feat_channels=[256, 256, 256]
     feat_strides=[8, 16, 32]
     num_levels=3
-    num_decoder_points=64    # default 4
+    num_decoder_points=32    # default 4
     nhead=8
     num_decoder_layers=dec_layers
     dim_feedforward=1024
@@ -172,7 +172,8 @@ def test(model, data_loader, device, logger=None):
             # ap_metric.update(preds, target)
             compute_metrics(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), metrics_dict)
             if logger is not None:
-                logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
+                pass
+                #logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
 
     print("Results:")
     print_metrics(metrics_dict)
