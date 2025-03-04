@@ -165,14 +165,14 @@ def filterBuoys(ship_pose, buoyCoords, fov_with_padding=110, dist_thresh=1000, n
     return list(set(selected_buoys))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-path_to_weights = "training_results/run_MLP9/best.pth"
+path_to_weights = "training_results/run_MLP10_newMet/best.pth"
 
-path_to_video = "/home/marten/Uni/Semester_4/src/TestData/954_2.avi"
-path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_954.txt"
+# path_to_video = "/home/marten/Uni/Semester_4/src/TestData/954_2.avi"
+# path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_954.txt"
 # path_to_video = "/home/marten/Uni/Semester_4/src/TestData/22_2.avi"
 # path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt"
-# path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi"
-# path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt"
+path_to_video = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi"
+path_to_imu = "/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt"
 # path_to_video = "../TestData/videos_from_training/19_2.avi"
 # path_to_imu = "../TestData/videos_from_training/furuno_19.txt"
 

@@ -157,7 +157,9 @@ class BuoyAssociation():
                     (153/255, 102/255, 51/255, 1),
                     (255/255,153/155, 0, 1),
                     (224/255, 224/255, 224/255, 1),
-                    (128/255, 128/255, 0, 1)]
+                    (128/255, 128/255, 0, 1),
+                    (30/255, 30/255, 30/255, 1),
+                    (100/255, 100/255, 100/255, 1)]
 
         color_arr = []
         for x in filtered_buoys:
@@ -224,6 +226,10 @@ class BuoyAssociation():
                 ret, frame = cap.read()
                 if not ret:
                     break  # End of video
+
+                # if frame_id < 6560:
+                #     frame_id += 1
+                #     continue
 
                 color_dict_gt = {}
                 # preprocess data (create image & query tensor)
@@ -316,4 +322,5 @@ ba = BuoyAssociation()
 
 # ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/955_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/furuno_955.txt", rendering=True)
 # ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/videos_from_training/19_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_19.txt", rendering=True)
-ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/22_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt", rendering=True)
+# ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/22_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/furuno_22.txt", rendering=True)
+ba.video(video_path="/home/marten/Uni/Semester_4/src/TestData/videos_from_training/1004_2.avi", imu_path="/home/marten/Uni/Semester_4/src/TestData/videos_from_training/furuno_1004.txt", rendering=True)

@@ -109,7 +109,7 @@ def print_latency(latency):
 @torch.no_grad()
 def test(model, data_loader, device, logger=None):
     model.eval()
-    # ap_metric=torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type='bbox')
+    ap_metric=torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type='bbox')
 
     metrics_dict = defaultdict(float)
     latency_dict = defaultdict(float)
@@ -128,8 +128,8 @@ def test(model, data_loader, device, logger=None):
             latency_dict["time"] += (time.perf_counter() - start_time) * 1000
             latency_dict["count"] += images.size(0)
 
-            # preds, target = prepare_ap_data(outputs, labels, labels_mask)
-            # ap_metric.update(preds, target)
+            preds, target = prepare_ap_data(outputs, labels, labels_mask)
+            ap_metric.update(preds, target)
             compute_metrics(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), metrics_dict)
             if logger is not None:
                 logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
@@ -141,11 +141,11 @@ def test(model, data_loader, device, logger=None):
     print()
 
     if logger is not None:
-        logger.printCF(thresh = 0.5, mode='val')    # Print Confusion Matrix for threshold of 0.5
+        logger.printCF(thresh=0.9, mode='val')    # Print Confusion Matrix for threshold of 0.5
         ap50 = logger.print_mAP50(mode='val')
         logger.print_mAP50_95(mode="val")
-        # res = ap_metric.compute()
-        # pprint(res)
+        res = ap_metric.compute()
+        pprint(res)
         return ap50
     else:
         return None
@@ -181,7 +181,7 @@ path_to_dataset = "/home/marten/Uni/Semester_4/src/TestData/TestLabeled/Generate
 aux_loss = False
 
 # Optimizer / DataLoader
-batch_size=1
+batch_size=8
 weight_decay=1e-3
 epochs=120
 lr_drop=65
@@ -231,7 +231,7 @@ if not os.path.isdir(output_dir):
     os.makedirs(output_dir, exist_ok=True)
 logger.saveStatsLogs(output_dir, 0)
 logger.plotPRCurve(path=output_dir, mode='val')
-logger.plotConfusionMat(path=output_dir, thresh=0.5, mode='val')
+logger.plotConfusionMat(path=output_dir, thresh=0.9, mode='val')
 logger.plotPRCurveDet(path=output_dir, mode="val")
 
 logger.writeEpochStatsLog(path=output_dir, best_epoch=0)

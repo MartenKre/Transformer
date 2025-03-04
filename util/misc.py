@@ -199,7 +199,7 @@ class BasicLogger():
         if iou_thresh not in self.stats_dict[mode]['mAP']:
             self.stats_dict[mode]['mAP'][iou_thresh] = {}
 
-        conf_threshs = np.linspace(start=0.0005, stop=0.995, num=60)
+        conf_threshs = np.linspace(start=0.05, stop=0.95, num=60)
         for c_t in conf_threshs:
             c_t = round(c_t, 3)
             if c_t not in self.stats_dict[mode]['mAP'][iou_thresh]:
@@ -382,10 +382,10 @@ class BasicLogger():
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0
             pr_curve.append((precision, recall, ct))
         pr_curve = sorted(pr_curve, key=lambda x: x[1])
-        start_val = (pr_curve[0][0], 0, 1)
-        pr_curve.insert(0, start_val)
-        end_val = (0, pr_curve[-1][1], 0)
-        pr_curve.append(end_val)
+        # start_val = (pr_curve[0][0], 0, 1)
+        # pr_curve.insert(0, start_val)
+        # end_val = (0, pr_curve[-1][1], 0)
+        # pr_curve.append(end_val)
         y,x,z = zip(*pr_curve)
 
         z = np.array(z)
