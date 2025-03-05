@@ -7,6 +7,7 @@ import sys
 from tqdm import tqdm
 import torchmetrics
 from pprint import pprint
+import numpy as np
 
 from datasets.buoy_dataset import BuoyDataset, collate_fn
 from torch.utils.data import DataLoader
@@ -106,12 +107,58 @@ def print_latency(latency):
     print("Latency: ", round(latency), "ms")
     print("FPS: ", round(1 / (latency/1000), 2))
 
+def compute_F1_over_dist(outputs, queries, labels, queries_mask, labels_mask, results_dict_distance, iou_thresh=0.5, conf_thresh=0.90):
+    src_logits = outputs['pred_logits'].cpu().detach()     # only get logits, that have corresponding label
+    bb_preds = outputs['pred_boxes'].cpu().detach()
+    for b in range(0,src_logits.size(0)):    # batch size
+        for q in range(0,src_logits.size(1)):    # query index
+            if queries_mask[b, q] == True:
+                dist = int(queries[b, q, 0] * 1000 // 50)
+                if dist not in results_dict_distance:
+                    results_dict_distance[dist] = {"tp": 0, "fp": 0, "fn": 0, "IoU": 0, "tp_match": 0}
+
+                if src_logits[b,q] >= conf_thresh:
+                    if labels_mask[b,q] == True:
+                        res = computeIOU(bb_preds[b, q].unsqueeze(0), labels[b,q][...,1:].unsqueeze(0))
+                        results_dict_distance[dist]["IoU"] += res
+                        results_dict_distance[dist]["tp_match"] += 1
+                        if res > iou_thresh:
+                            results_dict_distance[dist]["tp"] += 1
+                        else:
+                            results_dict_distance[dist]["fp"] += 1
+                            results_dict_distance[dist]["fn"] += 1
+                    else:
+                        results_dict_distance[dist]["fp"] += 1
+                else:
+                    if labels_mask[b,q] == True:
+                        results_dict_distance[dist]["fn"] += 1
+
+def save_F1_over_dist(metrics, test_dir):
+    distances = sorted([k for k in metrics])
+    f1_scores = []
+    res = np.zeros((len(distances), 3))
+    for i, k in enumerate(distances):
+        p = metrics[k]["tp"] / (metrics[k]["tp"] + metrics[k]["fp"]) if metrics[k]["tp"]+ metrics[k]["fp"] > 0 else 0
+        r = metrics[k]["tp"] / (metrics[k]["tp"] + metrics[k]["fn"]) if metrics[k]["tp"]+ metrics[k]["fn"] > 0 else 0
+        f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0
+        iou = metrics[k]["IoU"] / metrics[k]["tp_match"] if metrics[k]["tp_match"] > 0 else 0
+        res[i, 0] = k
+        res[i, 1] = f1
+        res[i, 2] = iou
+        f1_scores.append(f1)
+    print()
+    print("F1 and IoU over distances:")
+    print(res)
+    np.save(os.path.join(test_dir, 'np_arr.npy'), res)
+
+
 @torch.no_grad()
 def test(model, data_loader, device, logger=None):
     model.eval()
     ap_metric=torchmetrics.detection.MeanAveragePrecision(box_format="cxcywh", iou_type='bbox')
 
     metrics_dict = defaultdict(float)
+    metrics_dict_distance = {}
     latency_dict = defaultdict(float)
     with tqdm(data_loader, desc=str(f"Test").ljust(8), ncols=150) as pbar:
         for images, queries, labels, queries_mask, labels_mask, name in pbar:
@@ -131,6 +178,7 @@ def test(model, data_loader, device, logger=None):
             preds, target = prepare_ap_data(outputs, labels, labels_mask)
             ap_metric.update(preds, target)
             compute_metrics(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), metrics_dict)
+            compute_F1_over_dist(outputs, queries.cpu().detach(), labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), metrics_dict_distance)
             if logger is not None:
                 logger.computeStats(outputs, labels.cpu().detach(), queries_mask.cpu().detach(), labels_mask.cpu().detach(), mode='val')
 
@@ -139,6 +187,7 @@ def test(model, data_loader, device, logger=None):
     print()
     print_latency(latency_dict)
     print()
+    save_F1_over_dist(metrics_dict_distance, output_dir)
 
     if logger is not None:
         logger.printCF(thresh=0.9, mode='val')    # Print Confusion Matrix for threshold of 0.5
@@ -221,14 +270,14 @@ model_without_ddp.load_state_dict(checkpoint['model'], strict=True)
 
 logger = BasicLogger()
 print("Start testing")
+if not os.path.isdir(output_dir):
+    os.makedirs(output_dir, exist_ok=True)
 
 logger.resetStats() # clear logger for new epoch
 
 # validation
 val_results = test(model, data_loader_val, device, logger)
 
-if not os.path.isdir(output_dir):
-    os.makedirs(output_dir, exist_ok=True)
 logger.saveStatsLogs(output_dir, 0)
 logger.plotPRCurve(path=output_dir, mode='val')
 logger.plotConfusionMat(path=output_dir, thresh=0.9, mode='val')
