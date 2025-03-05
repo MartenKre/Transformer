@@ -21,3 +21,4 @@ not_tracked_dir/
 .vscode
 *description.txt
 *training_results/
+*test_results/

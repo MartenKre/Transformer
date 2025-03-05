@@ -62,7 +62,7 @@ def init_decoder(aux_loss, dec_layers):
     feat_channels=[256, 256, 256]
     feat_strides=[8, 16, 32]
     num_levels=3
-    num_decoder_points=32    # default 4
+    num_decoder_points=64    # default 4
     nhead=8
     num_decoder_layers=dec_layers
     dim_feedforward=1024
